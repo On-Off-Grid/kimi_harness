@@ -1,0 +1,883 @@
+# pi-hunt Techniques Knowledge Base
+#
+# Curated, high-signal techniques used by top bug-bounty hunters, organized by
+# vulnerability class. Each entry becomes one (or more) RAG chunks: it is
+# embedded and made semantically searchable so any subagent can ask
+# "how do the best hunters approach <X>" and get concrete, battle-tested moves.
+#
+# Schema per entry:
+#   id:        stable unique slug
+#   class:     vuln class / topic
+#   title:     short human title
+#   severity:  typical severity band when it lands
+#   payout:    rough observed bounty band (calibration only)
+#   tags:      list for filtering
+#   technique: the actual method — what to do, in order
+#   signals:   what tells you this surface is worth pursuing
+#   pitfalls:  why hunters get false positives / what triagers reject
+#   refs:      pointers (writeup patterns, CWE, etc.)
+
+techniques:
+  - id: ssrf-cloud-metadata-imds
+    class: SSRF
+    title: SSRF to cloud metadata (IMDS) for credential theft
+    severity: critical
+    payout: "$3.5k–$50k"
+    tags: [ssrf, cloud, aws, gcp, azure, imds, metadata, rce-adjacent]
+    technique: >
+      Find any server-side URL fetch: webhook, image/avatar import, PDF/HTML
+      renderer, link preview, "import from URL", OIDC discovery URL, SSO
+      metadata URL, RSS/feed import, headless-browser screenshotter. Point it at
+      169.254.169.254 (AWS), metadata.google.internal (GCP, needs header
+      Metadata-Flavor: Google), or 169.254.169.254/metadata (Azure, needs
+      Metadata: true). If a blunt hit is filtered, escalate with: alternate IP
+      encodings (0x7f, decimal, octal, IPv6 ::ffff:169.254.169.254), DNS rebinding,
+      open-redirect chaining (allowlisted host 302→metadata), and gopher:// or
+      file:// where the client allows it. For IMDSv2, you need a PUT to fetch the
+      token then a GET with X-aws-ec2-metadata-token — only possible if the SSRF
+      sink lets you control method/headers (rare but high value).
+    signals: >
+      Server makes the outbound request (timing, callback to your collaborator,
+      via: 1.1 google headers, response reflects fetched content). A blind sink
+      that hits your OOB host from a cloud egress IP is already strong.
+    pitfalls: >
+      Allowlists that only permit specific hosts kill most attempts — prove the
+      bypass (CRLF/host-injection in the URL parser) before claiming. A callback
+      to your host alone is blind SSRF (medium) unless you can read a response or
+      reach metadata (high/critical). Don't claim IMDS without showing the role
+      name / token shape actually came back.
+    refs: [CWE-918, "Capital One breach pattern", "OIDC discovery SSRF"]
+
+  - id: oauth-redirect-uri-takeover
+    class: OAuth/ATO
+    title: redirect_uri / state weaknesses → account takeover
+    severity: critical
+    payout: "$5k–$50k+"
+    tags: [oauth, oidc, sso, ato, redirect, csrf, pkce]
+    technique: >
+      Enumerate the authorize endpoint params. Test redirect_uri for: prefix-only
+      match (victim.com.evil.com), path-traversal (/cb/../open), subdomain wildcards,
+      and registered-but-forgotten URIs. If the IdP stores your evil redirect, a
+      post-login code/token is delivered to you. Combine with: missing/static
+      `state` (login CSRF), `response_type=token` downgrade to leak tokens in the
+      fragment, open Dynamic Client Registration to register an attacker client,
+      and leaking code via Referer to an attacker resource on the redirect page.
+      For mobile/POS flows, alternate grant types often skip the strict checks the
+      web flow enforces.
+    signals: >
+      authorize endpoint accepts attacker redirect_uri (302 with code/continue= to
+      your host), CORS ACAO:* on token endpoints, code_verifier returned to an
+      unauthenticated caller, SameSite=None session cookies.
+    pitfalls: >
+      Exact-match redirect_uri + PKCE + single-use codes defeats most of this —
+      prove the IdP actually delivers the secret to your origin (show the continue=
+      / fragment), not just that an error page rendered.
+    refs: [CWE-601, CWE-352, "RFC 6749 3.1.2.2", "RFC 9700"]
+
+  - id: idor-bola-sequential-and-uuid
+    class: IDOR/BOLA
+    title: Object-level authz bypass on IDs (read AND write)
+    severity: high
+    payout: "$1k–$20k"
+    tags: [idor, bola, access-control, api, graphql, mass-assignment]
+    technique: >
+      For every object reference (id, uuid, slug, filename, GraphQL node id) try:
+      another tenant's id, inc/ decrement, swap your id for a victim's, and the
+      same id across HTTP verbs (GET allowed but PUT/PATCH/DELETE unchecked is a
+      common gap). UUIDs are not security — harvest them from other responses,
+      emails, JS bundles, or list endpoints. Prioritize WRITE BOLA (changing a
+      victim's record) over read — it scores higher. Test GraphQL batching and
+      alias abuse to bypass per-object checks. Mass-assignment: add fields like
+      role, isAdmin, ownerId, price to the body.
+    signals: >
+      Numeric/sequential ids, the same id echoed in multiple endpoints, an API
+      that authenticates the session but not the object owner, list endpoints that
+      leak other tenants' ids.
+    pitfalls: >
+      Prove cross-tenant by reading/altering data that is provably NOT yours
+      (use two accounts). A 200 with your own data re-fetched is not IDOR. Watch
+      for server-side ownership re-derivation (the secure pattern).
+    refs: [CWE-639, CWE-862, CWE-285, "OWASP API1:2023 BOLA"]
+
+  - id: race-limit-and-money
+    class: Race condition
+    title: TOCTOU races on limits, redemption, and balance
+    severity: high
+    payout: "$2k–$30k"
+    tags: [race, toctou, payment, coupon, invite, limit]
+    technique: >
+      Anywhere a check precedes a state change — coupon/gift-card redemption,
+      withdrawal, "one per user" invite/vote, plan-seat limit, follow/like — fire
+      N concurrent identical requests (single-packet attack via HTTP/2, or Turbo
+      Intruder last-byte sync). Goal: redeem once-only value multiple times, exceed
+      a limit, or create duplicate state. Pair with IDOR to race a victim's object.
+    signals: >
+      Endpoints that decrement a balance, enforce uniqueness, or apply a one-time
+      discount; no idempotency key; no row lock visible (response timing varies).
+    pitfalls: >
+      Show the duplicated outcome (two redemptions, negative balance, 2 seats from
+      1), not just two 200s. Many frameworks lock the row — a clean negative is a
+      valid result, not a finding.
+    refs: [CWE-362, "single-packet attack", "Turbo Intruder"]
+
+  - id: cache-deception-and-poisoning
+    class: Web cache
+    title: Web cache deception / poisoning
+    severity: high
+    payout: "$2k–$25k"
+    tags: [cache, cdn, deception, poisoning, akamai, cloudflare]
+    technique: >
+      DECEPTION: request /account/info.css (or .js/.png) — if the CDN caches by
+      extension but the origin ignores the suffix and returns the authenticated
+      page, the victim's private response gets cached at a public URL you can then
+      fetch. POISONING: find unkeyed inputs (X-Forwarded-Host, X-Forwarded-Scheme,
+      odd headers) that reflect into the response; poison a cached resource so all
+      users get your injected content (XSS, redirect). Probe cache with distinct
+      cache-buster query params and watch X-Cache/Age headers.
+    signals: >
+      CDN present (Cloudflare/Akamai/Fastly), responses with Age/X-Cache, static
+      extension routing, header values reflected in body or Location.
+    pitfalls: >
+      Prove a SECOND client gets the cached secret/payload (use a clean session).
+      A single-session reflection is not poisoning.
+    refs: [CWE-525, "Kettle web cache entanglement", "X-Forwarded-Host poisoning"]
+
+  - id: rce-ssti-and-deser
+    class: RCE
+    title: SSTI / deserialization / framework RCE
+    severity: critical
+    payout: "$5k–$100k+"
+    tags: [rce, ssti, deserialization, spring, jinja, nextjs, php]
+    technique: >
+      Fingerprint the framework first, then aim the right primitive: Jinja2/Twig
+      SSTI ({{7*7}} → {{config}} → RCE gadget), Spring SpEL/Thymeleaf, .NET/Java
+      deserialization (ysoserial gadget into a cookie/viewstate/serialized param),
+      PHP unserialize() POP chains, Next.js middleware bypass + RSC prototype
+      pollution, Ruby Marshal. Confirm code exec out-of-band (DNS/HTTP callback)
+      before touching the filesystem. PHP mail() with -X writes a webshell.
+    signals: >
+      Template errors that reflect math, version banners, serialized blobs in
+      cookies/params (rO0, TzoX, base64 of a class name), debug pages.
+    pitfalls: >
+      OOB callback proves exec; reflected {{49}} alone can be sandboxed. Stay
+      non-destructive — prove exec, don't pop a shell on prod.
+    refs: [CWE-94, CWE-502, CWE-1336, "ysoserial", "tplmap patterns"]
+
+  - id: xss-stored-and-chained
+    class: XSS
+    title: XSS that chains to real impact
+    severity: medium
+    payout: "$500–$10k"
+    tags: [xss, stored, dom, csp, ato]
+    technique: >
+      Hunt stored over reflected. Test every field that renders elsewhere
+      (display name, org name, support ticket, filename, SVG upload). For DOM XSS,
+      trace sources (location, postMessage, localStorage) to sinks (innerHTML,
+      eval, document.write). Bypass weak CSP via JSONP endpoints, allowed CDNs, or
+      nonce reuse. Escalate self-XSS with login/logout CSRF or a cache-poison
+      delivery. Aim the payload at an admin context (blind XSS via Collaborator)
+      for ATO-grade impact.
+    signals: >
+      Input reflected without context-correct encoding, SVG/HTML upload, a CSP
+      with unsafe-inline or wide allowlists, admin panels that render user content.
+    pitfalls: >
+      Server-side allowlists on names defeat many stored attempts. Self-XSS with
+      no delivery is not a finding; show victim execution.
+    refs: [CWE-79, "blind XSS", "DOM Invader"]
+
+  - id: smuggling-desync
+    class: Request smuggling
+    title: HTTP request smuggling / desync
+    severity: critical
+    payout: "$5k–$30k"
+    tags: [smuggling, desync, cl-te, te-cl, h2]
+    technique: >
+      Against front-end/back-end pairs (CDN→origin), test CL.TE / TE.CL / TE.TE
+      and HTTP/2 downgrade desync. Use timing-based detection first (delayed
+      response on a crafted request), then prove with a benign prefix that
+      captures the next request or returns another user's response. H2.CL and H2.TE
+      via header smuggling on HTTP/2 front ends.
+    signals: >
+      Distinct front-end and back-end servers, Transfer-Encoding handling quirks,
+      connection reuse, timing anomalies on ambiguous length.
+    pitfalls: >
+      Prove cross-request impact (capture/poison) carefully and non-destructively —
+      smuggling can hit other real users; keep PoC to your own requests.
+    refs: [CWE-444, "Kettle HTTP desync", "h2 downgrade"]
+
+  - id: subdomain-takeover-dangling
+    class: Takeover
+    title: Dangling DNS / subdomain takeover
+    severity: high
+    payout: "$1k–$10k"
+    tags: [takeover, dns, cname, cloud]
+    technique: >
+      Enumerate subdomains, resolve CNAMEs, find ones pointing at de-provisioned
+      services (S3, Azure App Service/Front Door, GitHub Pages, Heroku, Unbounce,
+      SendGrid, Fastly). Confirm the target service returns its "unclaimed" 404 /
+      NXDOMAIN-origin signal, then verify the service still allows claiming that
+      name.
+    signals: >
+      CNAME → third-party host that 404s with the provider's claim page; AFD/App
+      Service origin NXDOMAIN; S3 NoSuchBucket.
+    pitfalls: >
+      Provider-specific: many (Unbounce, GitHub) now require ownership
+      verification — a 404 is necessary but NOT sufficient. Don't write a takeover
+      candidate on a single timeout/000; require a provider-specific orphan signal
+      or two independent indicators.
+    refs: [CWE-350, "can-i-take-over-xyz"]
+
+  - id: llm-prompt-injection-and-tools
+    class: AI/LLM
+    title: Prompt injection, tool/function abuse, RAG leakage
+    severity: high
+    payout: "$2k–$25k (fast-growing)"
+    tags: [llm, ai, prompt-injection, mcp, rag, agent]
+    technique: >
+      For chatbots/agents/MCP surfaces: indirect prompt injection (poison a page,
+      doc, or RAG source the model will read) to override instructions, exfiltrate
+      the system prompt, or call tools with attacker intent. Test for tool/function
+      abuse (can the model be steered to hit internal URLs = LLM-driven SSRF, or
+      run privileged actions). Probe RAG "sources" metadata that leaks internal KB
+      even on refused queries. Check for output-handling XSS (model returns HTML/JS
+      rendered unsanitized).
+    signals: >
+      Any chat/agent endpoint, MCP/tool protocol, "sources"/citations in responses,
+      a model that can fetch URLs or call functions.
+    pitfalls: >
+      Distinguish a model "saying" something from a real security boundary cross.
+      Leaking the system prompt is low unless it contains secrets; tool-abuse that
+      reaches internal systems or another user's data is the high-value version.
+    refs: ["OWASP LLM Top 10", "indirect prompt injection", CWE-200]
+
+  - id: recon-jsrecon-secrets
+    class: Recon
+    title: JS bundle / source-map mining for secrets and routes
+    severity: varies
+    payout: "varies (force-multiplier)"
+    tags: [recon, javascript, sourcemap, secrets, api-keys]
+    technique: >
+      Pull every JS bundle and any .map files. Beautify and grep for: API hosts,
+      hidden routes, feature flags, role checks, hardcoded keys (AWS AKIA, Google
+      AIza, AppSync da2-, SendGrid SG., Firebase config, Algolia, Stripe live).
+      Map the full API surface from the client router before touching the server.
+      Firebase config → test RTDB /.json and Firestore REST without auth. AppSync
+      da2- key → test API scope directly.
+    signals: >
+      Webpack bundles, exposed .map, inline config objects, da2-/AIza/AKIA strings.
+    pitfalls: >
+      A key in client JS may be intentionally public (e.g., Firebase apiKey is not
+      a secret by itself) — prove it grants access that should be gated.
+    refs: ["source-map disclosure", CWE-200, CWE-798]
+
+  - id: triage-discipline
+    class: Meta
+    title: What makes a report get PAID (triager lens)
+    severity: meta
+    payout: "n/a"
+    tags: [triage, reporting, impact, evidence]
+    technique: >
+      Lead with proven impact, not theory. Reproduce from zero in copy-paste curl
+      with real values and expected output after each step. Include a negative
+      control that proves the positive is real. Anchor severity to the program's
+      own bounty table. Name exact fields/records exposed. Subtract existing
+      defenses before claiming worst case. One finding per report; chain components
+      explicitly when they combine to Tier-1.
+    signals: "n/a"
+    pitfalls: >
+      Empty-200 'bypasses', self-XSS, missing-header noise, staging-only leaks,
+      and theoretical impact get closed. 'Needs more evidence' usually means you
+      didn't show the second account / the read-back / the fired callback.
+    refs: ["business-impact skill", "strict-triager"]
+
+  # ==========================================================================
+  # Class: Chain — composed low/medium signals that escalate to Tier-1 impact.
+  #
+  # These are ESCALATION patterns, not single-class techniques. Extra fields
+  # below (kind, tier, origin, status, trigger_signal, preconditions,
+  # gadget_granted, escalation_target, detection_heuristic, negative_control,
+  # route_to, precedent) are carried for humans and a future ingest upgrade;
+  # the CURRENT ingester only embeds title/class/severity/payout/tags/technique/
+  # signals/pitfalls/refs, so each chain mirrors its content into those fields
+  # (technique = the ordered composition, signals = trigger + detection,
+  # pitfalls = negative control) to stay semantically retrievable today.
+  #
+  # origin: model = validated on our own targets (casefile); human = public writeup.
+  # status: validated | candidate | draft.
+  # ==========================================================================
+
+  - id: chain-crmchat-unauth-token-to-oauth-link
+    kind: chain
+    class: Chain
+    title: Unauth admin over-disclosure -> user_token harvest -> OAuth account-link CSRF (ATO path)
+    tier: 1
+    severity: high
+    payout_band: "$3k-$25k (ATO-grade if the link leg lands)"
+    payout: "$3k-$25k"
+    origin: model
+    status: validated
+    tags: [chain, info-disclosure, user-enumeration, oauth, csrf, ato, token-harvest, crmchat, crmco, origin-model, status-validated]
+    trigger_signal: >
+      An unauthenticated / weakly-gated endpoint (Referer-presence-gated
+      /api/admin/waitlist/list, or an unauth data dump) returns per-user secret
+      material in bulk -- here email + user_token for thousands of users.
+    preconditions:
+      - "An unauth/weakly-gated endpoint returns a per-user token/secret in bulk (confirmed: Referer-presence bypass)."
+      - "That same token is the identity/authorization material for another flow (OAuth account-link state={user_token})."
+      - "The consuming flow does not bind the token to a session/CSRF token (unsigned, attacker-controllable state)."
+    gadget_granted: >
+      Harvesting the per-user user_token turns an anonymous attacker into a holder
+      of every victim's account-link credential; the unsigned state param then lets
+      the attacker bind a victim identity to an attacker-controlled OAuth grant.
+    escalation_target: >
+      Mass account linking / account takeover: attacker completes a CRMCo-OAuth
+      grant carrying a victim's user_token in state, associating the victim record
+      with attacker-controlled data or session.
+    detection_heuristic: >
+      When an unauth endpoint leaks a field named *_token/token/secret per user,
+      immediately grep the app's auth/link/oauth flows for that same field name in a
+      state/redirect/link parameter. If it appears in state= without a signature or
+      session binding, both links of the chain are present.
+    negative_control: >
+      The disclosure legs are CONFIRMED on a real program (see casefile). The
+      account-link/ATO leg is NOT yet proven end-to-end there: a real cross-account OAuth grant with a foreign user_token in
+      state must be observed to bind the victim. If the link flow re-derives identity
+      server-side or rejects a mismatched state, the ATO leg fails and this collapses
+      to a Medium disclosure only.
+    route_to: [oauth-hunter, idor-logic-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-200, CWE-352, CWE-639, "case_redacted01", "case_redacted02", "case_redacted03"]
+    technique: >
+      1) Hit the unauth/weakly-gated admin/list endpoint and harvest email+user_token
+      in bulk. 2) Locate the OAuth account-link flow that consumes user_token in the
+      state parameter. 3) Initiate a link/grant with a VICTIM's user_token in state
+      from an attacker context and observe whether the victim record is bound to the
+      attacker grant. 4) Prove impact with a second (victim) account you own.
+    signals: >
+      Unauth endpoint returns per-user *_token in bulk; the same token name appears
+      in an OAuth/link state= param with no signature or session binding.
+    pitfalls: >
+      Disclosure alone is Medium. Do not claim ATO until a foreign-user_token state
+      is shown to actually associate the victim (currently unproven). Server-side
+      identity re-derivation defeats the link leg.
+
+  - id: chain-pingfederate-heartbeat-cve-oracle
+    kind: chain
+    class: Chain
+    title: Unauth PingFederate heartbeat -> adapter/version oracle -> targeted CVE + internal SSRF target pack
+    tier: 2
+    severity: medium
+    payout_band: "$150 base (info-leak) -> High if a gated CVE/SSRF leg lands"
+    payout: "$150+"
+    origin: model
+    status: validated
+    tags: [chain, info-disclosure, pingfederate, cve-oracle, ssrf-targeting, azure, internal-ip, origin-model, status-validated]
+    trigger_signal: >
+      Unauthenticated GET /pf/heartbeat.ping returns DETAILED JSON (not a bare
+      "OK") -- adapter.* keys with live error counters, cluster IPs/ports, JDBC/LDAP
+      datasource presence, JVM metrics, and Azure AD tenant GUIDs.
+    preconditions:
+      - "heartbeat returns detailed status (showDetailedStatus not disabled)."
+      - "For the CVE legs: a valid client_id harvested from the vendor's mobile apps or web SSO redirect."
+      - "For the SSRF leg: a later server-side URL-fetch sink exists somewhere in scope."
+    gadget_granted: >
+      A live deployment oracle: exact auth-adapter inventory (adapter.OTP/OTPV3 ->
+      OTP Integration Kit; adapter.IdentifyFirst -> HTML Form Adapter) + a version
+      band from /.well-known/openid-configuration + a ready internal-target pack
+      (cluster IPs, Azure tenants, datasource hosts).
+    escalation_target: >
+      (a) Version+adapter -> select the exact PingFederate CVE to test on an OWNED
+      account (CVE-2025-27935 OTP MFA bypass; CVE-2025-26862 redirectless brute).
+      (b) Feed the leaked internal IPs/Azure tenants to any later SSRF so a blind
+      medium SSRF becomes a named-internal-auth-infra High.
+    detection_heuristic: >
+      Detailed heartbeat + openid-configuration together = fingerprint. Map adapter.*
+      keys to their Integration Kits, then map each kit to its known CVE. Save the
+      internal IP/tenant list as an SSRF target pack keyed to the program.
+    negative_control: >
+      The oracle/disclosure is CONFIRMED on a real program (see casefile). The CVE legs are HARD-
+      GATED: /as/token.oauth2 ROPC returns 401 invalid_client without a valid
+      client_id, and the auth-bypass CVEs need a client_id + authenticated flow. If
+      no valid client_id is harvested, the CVE legs do not fire and this stays a Low
+      info-leak. The SSRF leg requires an actual sink to exist.
+    route_to: [cve-misconfig-hunter, oauth-hunter, ssrf-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-306, CWE-200, "CVE-2025-27935", "CVE-2025-26862", "CVE-2023-40545", "case_redacted04"]
+    technique: >
+      1) GET /pf/heartbeat.ping unauth; confirm detailed JSON. 2) Enumerate adapter.*
+      keys -> map to Integration Kits. 3) GET /.well-known/openid-configuration ->
+      band the version. 4) Harvest a valid client_id from the vendor mobile app / web
+      SSO redirect. 5) Test the matched CVE on an OWNED account only. 6) Save cluster
+      IPs/Azure tenants as an SSRF target pack for later sinks.
+    signals: >
+      Detailed heartbeat JSON with adapter.*, cluster IPs, Azure tenant GUIDs, JDBC/
+      LDAP datasource keys.
+    pitfalls: >
+      Detailed heartbeat alone is Low. ROPC and the auth CVEs need a real client_id;
+      never test CVEs on a non-owned account. Internal IPs are only useful once a
+      real SSRF sink is found.
+
+  - id: chain-cloudfront-bypass-to-cart-bola
+    kind: chain
+    class: Chain
+    title: CloudFront 400 header bypass -> reach mobile gateway -> SID-based cross-user cart BOLA (read+write)
+    tier: 2
+    severity: medium
+    payout_band: "$1k-$10k"
+    payout: "$1k-$10k"
+    origin: model
+    status: validated
+    tags: [chain, waf-bypass, cloudfront, bola, idor, session-id, cart, petmarket, origin-model, status-validated]
+    trigger_signal: >
+      A CDN/WAF (CloudFront) returns 400 to plain requests, but adding X-Caller + a
+      mobile User-Agent passes the edge and reaches the mobile API gateway.
+    preconditions:
+      - "Edge blocks direct access but a header/UA combination bypasses it (confirmed X-Caller + mobile UA)."
+      - "Behind the edge, an object (cart) is addressed by a client-supplied SID that is not bound to the caller's identity."
+    gadget_granted: >
+      The header bypass restores reachability to the gateway; the SID being the only
+      object key (no owner check) grants cross-user object access.
+    escalation_target: >
+      BOLA read AND write of any user's cart via their SID on /cart/v2 -- cross-user
+      data read and modification.
+    detection_heuristic: >
+      When an edge 400s, try mobile-app headers/UA to slip through; once inside, test
+      whether the object identifier (SID/cart id) works across two accounts without
+      an ownership check. Prioritize the WRITE verb.
+    negative_control: >
+      Both legs CONFIRMED on a real program (see casefile). Prove
+      cross-user with two owned accounts: read/modify account B's cart using B's SID
+      from account A's context. If the gateway re-derives ownership from the session,
+      the BOLA leg fails.
+    route_to: [idor-logic-hunter, bypass-innovator, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-639, CWE-284, "case_redacted06", "case_redacted07"]
+    technique: >
+      1) Confirm edge 400 on a direct request. 2) Re-send with X-Caller + a mobile
+      User-Agent to reach mobile-api-gateway. 3) On /cart/v2, supply another user's
+      SID; observe cross-user read. 4) Repeat with the write verb to modify the
+      victim cart. 5) Prove with two owned accounts.
+    signals: >
+      Edge 400 that flips to 200 with mobile headers; cart addressed by a bare SID
+      with no per-caller ownership check.
+    pitfalls: >
+      A 200 re-fetching your own cart is not BOLA. Show a provably foreign cart
+      (second account). Some gateways bind SID->session server-side (secure).
+
+  - id: chain-openredirect-ssrf-imds-rce
+    kind: chain
+    class: Chain
+    title: Open redirect on trusted host -> SSRF filter bypass -> cloud metadata IMDS -> IAM creds -> RCE
+    tier: 1
+    severity: critical
+    payout_band: "$10k-$50k+"
+    payout: "$10k-$50k+"
+    origin: human
+    status: draft
+    tags: [chain, open-redirect, ssrf, imds, cloud, aws, iam, rce, origin-human, status-draft]
+    trigger_signal: >
+      An open redirect (or a server-side fetcher that follows redirects) on an
+      allowlisted/trusted host, next to any URL-fetch sink.
+    preconditions:
+      - "A server-side fetch sink with a host allowlist."
+      - "An open redirect on an allowlisted host, OR a URL parser that follows 30x."
+      - "Instance metadata reachable from the app egress (IMDSv1, or controllable method/headers for IMDSv2)."
+    gadget_granted: >
+      The allowlisted open redirect defeats the SSRF host filter (allowlisted host
+      302 -> 169.254.169.254), turning a filtered fetch into arbitrary internal reach.
+    escalation_target: >
+      Read cloud metadata -> steal IAM role credentials -> use creds against the
+      cloud API for lateral movement / RCE-equivalent account compromise.
+    detection_heuristic: >
+      For every SSRF sink with an allowlist, look for an open redirect on any
+      allowlisted host and chain it. Confirm egress hits IMDS by returning the role
+      name / token shape, not just a callback.
+    negative_control: >
+      DRAFT -- not validated on our targets. Prove the redirect is actually followed
+      by the server-side fetcher (OOB callback from a cloud egress IP) AND that the
+      metadata response (role name / credentials JSON) is returned. IMDSv2 needs a
+      PUT token then a header GET; if the sink cannot set method/headers, the creds
+      leg fails and it stays a blind SSRF (medium).
+    route_to: [ssrf-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-601, CWE-918, "Assetnote SSRF redirect 2025", "IMDSv2 PUT-then-GET"]
+    technique: >
+      1) Find the SSRF sink + its host allowlist. 2) Find an open redirect on an
+      allowlisted host. 3) Point the sink at allowlisted-host?next=http://169.254.169.254/...
+      4) For IMDSv2, drive PUT /latest/api/token then GET with the token header if the
+      sink allows it. 5) Return role name + credentials to prove; then show a
+      cloud-API call with the creds.
+    signals: >
+      Allowlisted-only fetcher, 30x-following URL parser, cloud egress on OOB
+      callbacks.
+    pitfalls: >
+      A callback alone is blind SSRF (medium). Must return metadata content. Do not
+      use stolen creds destructively -- prove scope read-only.
+
+  - id: chain-nextjs-cache-deception-token-theft
+    kind: chain
+    class: Chain
+    title: Next.js SSR->SSG cache flip / middleware quirk -> web cache deception on authed route -> mass session/token theft
+    tier: 1
+    severity: high
+    payout_band: "$5k-$30k"
+    payout: "$5k-$30k"
+    origin: human
+    status: draft
+    tags: [chain, nextjs, cache-deception, cache-poisoning, cdn, session-theft, ato, origin-human, status-draft]
+    trigger_signal: >
+      A Next.js app fronted by a CDN where a header/suffix trick flips an
+      authenticated SSR response into a cacheable one (x-now-route-matches +
+      __nextDataReq, stale-while-revalidate, or a static-extension suffix the origin
+      ignores).
+    preconditions:
+      - "Next.js (pages/app router) behind a shared CDN cache."
+      - "An authenticated endpoint whose response includes session/token/PII."
+      - "A way to make that response cacheable at a public URL (suffix or unkeyed header)."
+    gadget_granted: >
+      The cache flip stores a victim's authenticated response at a public,
+      attacker-fetchable cache key.
+    escalation_target: >
+      Web cache deception -> fetch victims' cached authenticated pages (session
+      tokens, CSRF tokens, PII) from a clean/unauth session -> ATO at scale.
+    detection_heuristic: >
+      On Next.js + CDN, probe /account.css, __nextDataReq=1, x-now-route-matches, and
+      stale-while-revalidate; watch X-Cache/Age. If an authed body is served to a
+      second clean client, WCD is confirmed.
+    negative_control: >
+      DRAFT -- not validated on our targets. Prove a SECOND, clean/unauth session
+      retrieves the first (authed) victim's secret from cache. A single-session HIT
+      or a body with no secret is not exploitable. Correct Cache-Control:private /
+      Vary defeats it.
+    route_to: [cache-poison-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-525, "CVE-2024-46982", "CVE-2025-29927", "Kettle web cache deception"]
+    technique: >
+      1) Fingerprint Next.js + CDN. 2) On an authed route, try suffix (.css) and
+      header (__nextDataReq=1 / x-now-route-matches) tricks; watch X-Cache/Age. 3)
+      Confirm the authed body is cached. 4) From a clean/unauth session, fetch the
+      public cache key and read the victim's secret. 5) Prove with two sessions.
+    signals: >
+      Next.js headers, CDN Age/X-Cache, authed response that becomes cacheable via
+      suffix/unkeyed header.
+    pitfalls: >
+      Must show cross-session cached secret retrieval. Cache-Control:private/Vary and
+      per-user cache keys defeat it.
+
+  - id: chain-traversal-upload-webshell-rce
+    kind: chain
+    class: Chain
+    title: Path traversal in upload filename -> write webshell to web root -> RCE
+    tier: 1
+    severity: critical
+    payout_band: "$10k-$110k+"
+    payout: "$10k-$110k+"
+    origin: human
+    status: draft
+    tags: [chain, path-traversal, file-upload, webshell, rce, lfi, origin-human, status-draft]
+    trigger_signal: >
+      A file-upload endpoint that puts the client-supplied filename (or a
+      path-influencing field) into the storage path, next to a directory the web
+      server will execute (.php/.jsp/.aspx) or include.
+    preconditions:
+      - "Upload accepts attacker-influenced filename/path or content-type."
+      - "Traversal (../ or encoded) in the filename is not normalized away before the write."
+      - "The written file lands in (or can traverse to) a web-executable / include-able directory."
+    gadget_granted: >
+      Traversal turns a benign upload into an arbitrary-location file WRITE; a web-
+      executable target turns that write into server-side code execution.
+    escalation_target: >
+      Drop a webshell (or overwrite an included/config file) -> RCE on the origin.
+    detection_heuristic: >
+      Send filename `..%2f..%2f<dir>/shell.php` with `Content-Type: image/png`; then
+      request the written path. Also test archive-import features and multipart
+      `filename*=` smuggling past `filename`-only filters. Prove exec out-of-band
+      (benign marker / DNS callback) before touching anything else.
+    negative_control: >
+      DRAFT -- not validated on our targets. If the server random-renames uploads,
+      strips path components, stores outside the web root, or blocks execution in the
+      upload dir, the write does NOT become RCE and this stays an upload/traversal
+      info issue. Prove the file is BOTH written to the intended path AND executed.
+    route_to: [path-traversal-hunter, rce-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-22, CWE-434, CWE-94, "Meta BountyCon 2024", "can chain with WAF origin-IP unmask"]
+    technique: >
+      1) Find the upload sink + where files land. 2) Inject traversal in the filename
+      (`../`, `..%2f`, `..%5c`, `filename*=`) with an image content-type. 3) Confirm
+      the file lands in a web-executable dir. 4) Request it; confirm code exec via a
+      benign marker/OOB callback. 5) Keep PoC non-destructive.
+    signals: >
+      Upload path reflects client filename; web-executable upload dir; archive import;
+      `filename*=` accepted where `filename` is filtered.
+    pitfalls: >
+      Random-rename, path-strip, non-web-root storage, and no-exec upload dirs all
+      defeat it. A write alone (no execution) is lower severity -- show exec.
+
+  - id: chain-ssti-injection-to-rce-infra
+    kind: chain
+    class: Chain
+    title: Reflected template/expression injection -> SSTI -> RCE -> internal/infra reach
+    tier: 1
+    severity: critical
+    payout_band: "$5k-$100k+"
+    payout: "$5k-$100k+"
+    origin: human
+    status: draft
+    tags: [chain, ssti, injection, rce, spring, jinja, spel, deserialization, infra, origin-human, status-draft]
+    trigger_signal: >
+      A user-controlled value rendered through a server-side template/expression
+      engine: math test `{{7*7}}`/`${7*7}`/`#{7*7}` evaluates, or a framework error
+      leaks a template/EL stack (Jinja2, Twig, Freemarker, Thymeleaf/SpEL, Velocity).
+    preconditions:
+      - "Input reaches a server-side template/expression evaluator (not just HTML)."
+      - "The engine exposes an RCE gadget (Jinja2 __globals__, SpEL T(), Freemarker api)."
+      - "Second-order sinks (HTML email, PDF, admin view) may render input escaped in the web UI."
+    gadget_granted: >
+      Template evaluation of attacker input = server-side code execution primitive;
+      once RCE holds, the box's egress/creds become an internal-network pivot.
+    escalation_target: >
+      RCE on the app server, then chain to infra: read env/IAM creds, hit internal
+      services, or pivot via the same host's SSRF egress (cloud metadata).
+    detection_heuristic: >
+      Confirm arithmetic eval FIRST (`{{7*7}}`->49) to separate SSTI from reflected
+      XSS, then escalate to a config/gadget read. Try second-order: inject into
+      name/contact fields and read the HTML EMAIL/PDF where it renders unescaped.
+      Bypass filters with `\N{DOLLAR SIGN}{7*7}` (named-unicode) where applicable.
+    negative_control: >
+      DRAFT -- not validated on our targets (one attempt on a SaaS trial went
+      negative -- no reachable render endpoint). Reflected
+      `49` inside an HTML sink with no server-side eval is XSS, not SSTI; a sandboxed
+      engine may eval math but block gadgets. Prove exec out-of-band before scoring RCE.
+    route_to: [injection-hunter, rce-hunter, ssrf-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-1336, CWE-94, CWE-917, "tplmap", "case_redacted08"]
+    technique: >
+      1) Fingerprint the engine. 2) Confirm eval with math. 3) Escalate to config/
+      gadget read (`{{config}}`, `T(java.lang.Runtime)`). 4) Prove exec via benign
+      OOB callback. 5) If RCE holds, enumerate env/creds and internal reach non-destructively.
+    signals: >
+      Math eval in reflection, template/EL stack traces, version banners, serialized
+      blobs, second-order render surfaces (email/PDF/admin).
+    pitfalls: >
+      Distinguish SSTI from XSS (math must evaluate). Sandboxes block gadgets. Never
+      pop a real shell on prod -- benign marker only.
+
+  - id: chain-actuator-debug-misconfig-to-admin-rce
+    kind: chain
+    class: Chain
+    title: Exposed Actuator/debug endpoint -> route map + creds/heapdump -> admin action / RCE
+    tier: 1
+    severity: high
+    payout_band: "$2k-$30k (High; Critical if heapdump creds -> RCE lands)"
+    payout: "$2k-$30k"
+    origin: model
+    status: draft
+    tags: [chain, misconfig, actuator, spring-boot, heapdump, debug, admin, rce, origin-model, status-draft]
+    trigger_signal: >
+      An unauthenticated Spring Boot Actuator (or framework debug/diagnostic)
+      endpoint is reachable: /actuator/{mappings,env,heapdump,health}, Django DEBUG,
+      /debug, /metrics with detail.
+    preconditions:
+      - "Actuator/debug endpoint reachable without auth."
+      - "It exposes sensitive detail (route/mappings map, env vars, or a heapdump)."
+      - "For the RCE/admin leg: leaked creds/secrets are live, or an admin/impersonation route it maps is itself reachable."
+    gadget_granted: >
+      /mappings leaks the internal admin/impersonation API route map; /env + /heapdump
+      leak secrets/tokens; together they convert a blind app into a documented target
+      list plus the credentials to hit it.
+    escalation_target: >
+      Use the leaked route map + extracted creds to invoke an internal admin/
+      impersonation endpoint (account takeover) or reach an RCE-capable actuator
+      (env->logging/jolokia, heapdump->session/creds).
+    detection_heuristic: >
+      GET /actuator (and common paths); if /mappings returns JSON, harvest admin/
+      impersonation routes; if /heapdump downloads, grep it for session tokens/creds;
+      if /env is writable (older boot), test the logging/jolokia RCE path. Always try
+      the mapped admin route with NO auth header first.
+    negative_control: >
+      DRAFT -- disclosure leg CONFIRMED on a real program (see casefile: unauth
+      Actuator leaked an internal admin/impersonation route map + telemetry), but
+      the admin/RCE escalation came back NEGATIVE/exhausted there (routes re-authenticated
+      server-side; may be RoE-excluded). Prove an actually-reachable admin action or
+      live-cred RCE, else this is an info-disclosure (Low/Medium), not a chain.
+    route_to: [cve-misconfig-hunter, rce-hunter, idor-logic-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-16, CWE-200, CWE-306, "Spring Boot Actuator heapdump", "case_redacted09"]
+    technique: >
+      1) Probe /actuator/* (and debug endpoints) unauth. 2) From /mappings harvest the
+      admin/impersonation route map. 3) From /heapdump or /env extract live secrets. 4)
+      Invoke a mapped admin route with no/att-controlled auth; or drive env/jolokia RCE.
+      5) Prove the state change (or exec) non-destructively.
+    signals: >
+      /actuator JSON, /mappings route map, downloadable /heapdump, verbose /env, Django
+      DEBUG page, framework diagnostic banners.
+    pitfalls: >
+      A leaked route map alone is disclosure. Mapped routes are often re-authenticated
+      server-side). Confirm reachability/live creds before claiming ATO/RCE;
+      check RoE exclusions for actuator classes.
+
+  - id: chain-prompt-injection-tool-abuse-ssrf-exfil
+    kind: chain
+    class: Chain
+    title: Indirect prompt injection -> agent tool-call abuse -> SSRF / cross-user data exfil
+    tier: 1
+    severity: high
+    payout_band: "$2k-$25k (fast-growing class)"
+    payout: "$2k-$25k"
+    origin: model
+    status: draft
+    tags: [chain, llm, ai, prompt-injection, mcp, tool-abuse, ssrf, data-exfil, agent, origin-model, status-draft]
+    trigger_signal: >
+      An AI assistant/agent that (a) ingests attacker-influenceable data (a page,
+      doc, RAG source, filename, ticket) AND (b) can call tools (fetch URL, run
+      query, read/write records) or exposes an MCP tools/list.
+    preconditions:
+      - "The model reads untrusted content that an attacker can plant."
+      - "The model can invoke a tool with side effects (URL fetch, DB/query, record access)."
+      - "Tool arguments are driven by model output without a hard allowlist / per-user authz."
+    gadget_granted: >
+      Indirect injection steers the agent's tool calls: the untrusted content becomes
+      attacker instructions, and the tool boundary becomes the exploit primitive
+      (server-side fetch = SSRF; record tool = cross-user read/exfil).
+    escalation_target: >
+      LLM-driven SSRF (agent fetches an internal URL / cloud metadata), or
+      cross-user/tenant data exfiltration via a tool that lacks per-caller authz;
+      or unsanitized model HTML output rendered as stored XSS.
+    detection_heuristic: >
+      Enumerate tools (MCP tools/list, or infer from behavior). Plant an injection in
+      a source the model will read that instructs it to fetch your OOB URL or return
+      another record; watch for the callback / foreign data. Test each tool for a
+      missing auth gate individually (one MCP endpoint often skips it).
+    negative_control: >
+      DRAFT -- components CONFIRMED individually on real programs (see casefile:
+      unauth MCP tools/list + tool invocation; leaked routing rules enabling indirect
+      injection; system-prompt disclosure) but the full chain not. Leaking a system prompt is Low; a model "saying"
+      something is not a boundary cross. Prove a real tool side effect (OOB SSRF
+      callback, or another user's data returned), not just model text.
+    route_to: [llm-hunter, ssrf-hunter, idor-logic-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: ["OWASP LLM Top 10", CWE-918, CWE-200, "case_redacted10", "case_redacted11", "case_redacted12"]
+    technique: >
+      1) Map the agent's tools (MCP tools/list or behavioral inference). 2) Plant
+      indirect-injection in an ingested source telling the agent to hit your OOB URL
+      or return a foreign record. 3) Trigger the agent to read it. 4) Observe the
+      tool side effect (SSRF callback / cross-user data). 5) Prove the boundary cross,
+      not just model text.
+    signals: >
+      Chat/agent endpoint, MCP tools/list, "sources"/citations, a model that fetches
+      URLs or calls functions, tool args echoing user text.
+    pitfalls: >
+      System-prompt leak alone is Low. Distinguish model output from a real boundary
+      cross. Tool authz may still be enforced server-side (test each tool).
+
+  - id: chain-pkce-authcode-interception-ato
+    kind: chain
+    class: Chain
+    title: PKCE not enforced at token endpoint + auth-code leak/interception -> account takeover
+    tier: 1
+    severity: high
+    payout_band: "$5k-$50k+ if code-leak leg lands"
+    payout: "$5k-$50k+"
+    origin: model
+    status: draft
+    tags: [chain, oauth, oidc, pkce, auth-code, ato, code-interception, keycloak, origin-model, status-draft]
+    trigger_signal: >
+      A public OAuth/OIDC client where the token endpoint redeems an authorization
+      code WITHOUT enforcing PKCE (missing/ignored code_verifier), or accepts a
+      downgraded/absent code_challenge.
+    preconditions:
+      - "Public client (no secret) whose /token redeems a code without a valid code_verifier."
+      - "A way to obtain/intercept a victim authorization code (open redirect, leaked redirect_uri, Referer leak, native-app loopback, silent code)."
+    gadget_granted: >
+      No-PKCE token redemption removes the binding between the auth-code request and
+      the token request, so ANY captured code can be exchanged by the attacker for the
+      victim's tokens.
+    escalation_target: >
+      Exchange an intercepted victim authorization_code at /token for the victim's
+      access/refresh tokens -> full account takeover.
+    detection_heuristic: >
+      At /token, redeem a code (a) with no code_verifier and (b) with a wrong one; if
+      either yields tokens, PKCE is not enforced. Separately hunt the code-leak gadget
+      (redirect_uri prefix/loopback, open redirect on an allowlisted host, Referer).
+    negative_control: >
+      DRAFT -- the PKCE-enforcement weakness is CONFIRMED on two real programs
+      (see casefile: no-PKCE token endpoint; public Keycloak client without PKCE), but
+      the code-LEAK leg went NEGATIVE on all tested redirect_uri hosts.
+      Without a real code-interception primitive, no-PKCE alone is Low. Prove an actual
+      captured victim code redeems for victim tokens.
+    route_to: [oauth-hunter, bypass-innovator, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-287, CWE-601, "RFC 9700", "RFC 7636 PKCE", "case_redacted13", "case_redacted14"]
+    technique: >
+      1) At /token, redeem an authorization_code with no/incorrect code_verifier; if it
+      succeeds, PKCE is not enforced. 2) Hunt a code-leak primitive (redirect_uri
+      prefix/wildcard/loopback, open redirect on allowlisted host, Referer leak). 3)
+      Capture a victim code and redeem it for victim tokens. 4) Prove ATO with two accounts.
+    signals: >
+      Public client, /token accepts code without code_verifier, permissive redirect_uri,
+      open redirect on allowlisted host, code in Referer/fragment.
+    pitfalls: >
+      No-PKCE alone (without a code-leak vector) is Low -- the leak leg is the hard part
+      and went negative for us. Exact-match redirect_uri + single-use
+      codes defeat interception. Prove with a real captured code.
+
+  - id: chain-zipslip-archive-extraction-rce
+    kind: chain
+    class: Chain
+    title: Archive extraction path traversal (Zip-Slip) -> overwrite executable/config -> RCE
+    tier: 1
+    severity: critical
+    payout_band: "$5k-$50k"
+    payout: "$5k-$50k"
+    origin: human
+    status: draft
+    tags: [chain, zip-slip, archive, path-traversal, file-write, rce, toctou, origin-human, status-draft, variant]
+    trigger_signal: >
+      A feature that extracts an uploaded/imported archive (zip/tar) server-side
+      (import, backup restore, plugin/theme install, avatar-pack) where entry names
+      are trusted during extraction.
+    preconditions:
+      - "Server extracts an attacker-supplied archive."
+      - "Archive entry names containing ../ (or a pre-planted symlink entry) are not sanitized."
+      - "Extraction can reach an executable/included/config path (or a symlink target)."
+    gadget_granted: >
+      Malicious entry names traverse out of the extraction dir to WRITE/overwrite an
+      arbitrary file; a symlink entry + same-name file entry gives a TOCTOU write
+      through the link (filesystem AFW).
+    escalation_target: >
+      Overwrite a web-executable file, an included config, a cron/startup script, or a
+      wrapper (mvnw/gradlew) -> code execution on extraction or next run.
+    detection_heuristic: >
+      Upload an archive with an entry `../../<web-root>/shell.php` (and a symlink+entry
+      pair for the TOCTOU variant); check whether the file appears outside the extract
+      dir / gets executed. Distinct from chain-traversal-upload-webshell-rce: the sink
+      is the ARCHIVE EXTRACTOR, not the raw upload filename.
+    negative_control: >
+      DRAFT -- not validated on our targets. Variant of chain-traversal-upload-webshell-rce
+      (different sink: archive extractor vs upload filename). If the extractor canonicalizes
+      entry paths, rejects `..`, or refuses symlinks, no traversal write occurs. Prove the
+      file lands outside the extract dir AND executes/loads.
+    route_to: [path-traversal-hunter, rce-hunter, security-analyzer]
+    precedent: >
+      Local casefile precedent (operator-private).
+    refs: [CWE-22, CWE-434, CWE-59, "Zip-Slip", "CVE-2026-40931", "variant of chain-traversal-upload-webshell-rce"]
+    technique: >
+      1) Find the server-side archive-extraction feature. 2) Craft an archive with a
+      traversing entry name (and a symlink+file pair for TOCTOU). 3) Import it. 4) Check
+      for the file outside the extract dir / execution. 5) Keep the payload benign.
+    signals: >
+      Import/restore/plugin-install features, tar/zip upload, extraction to a known
+      path near web root, symlink handling.
+    pitfalls: >
+      Canonicalizing extractors, `..`-rejection, and symlink refusal defeat it. A write
+      with no execution/load is lower severity -- show impact.

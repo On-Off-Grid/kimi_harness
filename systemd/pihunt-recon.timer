@@ -1,0 +1,12 @@
+[Unit]
+Description=pi-hunt recon cadence (periodic re-recon of all registered programs)
+
+[Timer]
+# first run 5 min after boot/login, then every 6 hours; catch up if missed.
+OnBootSec=5min
+OnUnitActiveSec=6h
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

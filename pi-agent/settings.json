@@ -1,0 +1,48 @@
+{
+  "defaultProvider": "kimi-coding",
+  "defaultModel": "k3",
+  "theme": "dark",
+  "defaultThinkingLevel": "xhigh",
+  "thinkingBudgets": {
+    "low": 8192,
+    "medium": 16384,
+    "high": 32768,
+    "xhigh": 60000
+  },
+  "skills": [
+    "~/.pi/agent/skills"
+  ],
+  "enableSkillCommands": true,
+  "warnings": {
+    "anthropicExtraUsage": false
+  },
+  "retry": {
+    "enabled": true,
+    "maxRetries": 5,
+    "provider": {
+      "maxRetries": 0
+    }
+  },
+  "branchSummary": {
+    "skipPrompt": true
+  },
+  "compaction": {
+    "enabled": true,
+    "keepRecentTokens": 20000
+  },
+  "lastChangelogVersion": "0.80.3",
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "quietStartup": false,
+  "packages": [
+    "npm:pi-casefile",
+    "npm:pi-recon-tools",
+    "npm:@artale/pi-pentest",
+    "npm:pi-redteam",
+    "npm:@vigolium/piolium",
+    "npm:pi-web-access"
+  ],
+  "hideThinkingBlock": true,
+  "collapseChangelog": true
+}

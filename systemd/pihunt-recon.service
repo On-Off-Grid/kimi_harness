@@ -1,0 +1,17 @@
+[Unit]
+Description=pi-hunt continuous recon (refreshes all registered programs, feeds the RAG)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# fast mode on each tick keeps cadence cheap; run a manual --deep occasionally.
+Environment=PIHUNT_RAG_HOME=__PIHUNT_HOME__/.pi-hunt-rag
+ExecStart=__PIHUNT_HOME__/.local/bin/pihunt-recon-scheduler --fast
+# don't let a slow target wedge the timer
+TimeoutStartSec=3600
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

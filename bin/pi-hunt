@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# pi-hunt — run pi.dev as the bug-bounty coordinator via direct OpenRouter.
+# Loads the coordinator brain (build.md) + workflow rules (bugbounty-autoflow.md) +
+# a pi execution adapter, on claude-opus-4.8 at max reasoning effort, with all 22
+# specialist subagents and local MCP tools available.
+#
+# Usage:
+#   pi-hunt                                   # interactive; then type: Hunt <program> for CRITICAL
+#   pi-hunt "Hunt <program> for CRITICAL/EXCEPTIONAL"
+#   pi-hunt -p "Hunt <program> for CRITICAL"  # one-shot (headless)
+set -uo pipefail
+
+# Auto-continue watchdog: ENABLED. Retained as a bounded, provider-neutral recovery
+# for no-tool end turns during a hunt. It originated as a Kiro server-side web-search
+# workaround; the Kiro-specific root cause is documented in docs/operator/01-health-analysis.md.
+# It is TUI-only, never runs in subagents/headless, respects [[HUNT_COMPLETE]] and
+# [[HUNT_BLOCKED]], and is capped by PI_AUTOCONTINUE_MAX_EMPTY and PI_AUTOCONTINUE_MAX.
+export PI_AUTOCONTINUE=1
+
+# Empty-trigger compaction: ENABLED. Retained as conservative large-context recovery;
+# its Kiro gateway-specific entropy-elision history remains documented separately.
+# The extension will summarize with Kimi-Coding and resume the coordinator
+# after compaction. Set COMPACT_ON_46_ON_EMPTY=0 to disable.
+export COMPACT_ON_46_ON_EMPTY=1
+export COMPACT_ON_46_PROVIDER="kimi-coding"
+export COMPACT_ON_46_MODEL="k3-256k"
+
+BUILD="__PIHUNT_HOME__/.config/opencode/prompts/claude-agents/build.md"
+FLOW="__PIHUNT_HOME__/.kiro/steering/bugbounty-autoflow.md"
+ADAPT="__PIHUNT_HOME__/.pi/agent/pi-coordinator-adapter.md"
+
+for f in "$BUILD" "$FLOW" "$ADAPT"; do
+  [ -r "$f" ] || { echo "pi-hunt: missing coordinator prompt: $f" >&2; exit 1; }
+done
+
+# Direct Anthropic Messages requests through OpenRouter; pi-kiro remains legacy-only.
+exec pi --model kimi-coding/k3:xhigh \
+  --append-system-prompt "$BUILD" \
+  --append-system-prompt "$FLOW" \
+  --append-system-prompt "$ADAPT" \
+  "$@"

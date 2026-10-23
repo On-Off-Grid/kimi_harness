@@ -1,0 +1,8 @@
+# RAG: never commit compiled bytecode or local runtime state
+__pycache__/
+*.pyc
+# runtime data lives outside the bundle in ~/.pi-hunt-rag (model, db, venv);
+# nothing here, but guard against accidental local copies:
+data/
+*.db
+.venv/

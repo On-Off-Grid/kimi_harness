@@ -1,0 +1,5 @@
+# pi-hunt RAG runtime deps. numpy is reused from system-site-packages.
+numpy>=1.24
+pyyaml>=6.0
+# optional but recommended: real static semantic embeddings (CPU/numpy, no torch)
+model2vec>=0.3.0

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# pi-kiro — run pi.dev backed by Kiro (Amazon Q) Claude Opus 4.8.
+#
+# The gateway follows kiro-cli's CURRENT account automatically: it reads the
+# live token from ~/.local/share/kiro-cli/data.sqlite3 on each use. To switch
+# accounts, just `kiro-cli login` (or re-auth) — pi tracks it within seconds,
+# no restart needed. This script only ensures the gateway is running.
+set -uo pipefail
+GW="__PIHUNT_HOME__/tools/kiro-gateway"
+PORT="${KIRO_GW_PORT:-8790}"
+
+if ! curl -s -m3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q 200; then
+  echo "pi-kiro: starting kiro-gateway on 127.0.0.1:$PORT ..." >&2
+  ( cd "$GW" && . .venv/bin/activate && nohup python main.py --port "$PORT" >gw.log 2>&1 & echo $! >gw.pid )
+  for i in $(seq 1 20); do
+    sleep 1
+    curl -s -m2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/health" 2>/dev/null | grep -q 200 && break
+  done
+fi
+
+exec pi "$@"

@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# pi-tier — cost/perf model tiering for the pi-hunt subagents.
+#
+# Heavy-reasoning agents (exploit creativity, chaining, validation) stay on the
+# flagship model; mechanical agents (scope loading, recon mapping, account
+# setup, UI observation, payload lookup) run on a cheaper "fast" model that does
+# the job for less. This cuts cost/latency on the high-volume mechanical work
+# without dulling the agents that actually find and prove bugs.
+#
+#   pi-tier on        apply tiering (mechanical agents -> fast model, elite pair -> k3.1-pro)
+#   pi-tier off       mechanical agents back to the flagship model (elite pair untouched)
+#   pi-tier status    show current per-agent models
+#   pi-tier set-fast <model-id>     change the fast model (default k3-256k)
+#
+# Flagship is the most common model among the agents. Fast model must exist in
+# ~/.pi/agent/models.json. Effect applies to NEW subagent spawns. The elite pair
+# (strict-triager, hypothesis-redteam) is always pinned to k3.1-pro.
+set -uo pipefail
+
+AGENTS="$HOME/.pi/agent/agents"
+MODELS_JSON="$HOME/.pi/agent/models.json"
+STATE="$HOME/.pi/agent/.tier-state"
+FAST_DEFAULT="k3-256k"
+PROVIDER="kimi-coding"
+
+# Elite pair: highest-value validation/redteam agents, pinned to k3.1-pro.
+ELITE_AGENTS=(
+  strict-triager
+  hypothesis-redteam
+)
+ELITE_DEFAULT="k3.1-pro"
+
+# Mechanical agents that run on the fast model when tiering is ON.
+FAST_AGENTS=(
+  h1-scope-loader
+  intigriti-scope-loader
+  yeswehack-scope-loader
+  recon
+  test-account-manager
+  visual-security
+  payload-researcher
+  wordlist-curator
+)
+
+ok(){ printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
+err(){ printf '  \033[1;31m✗ %s\033[0m\n' "$*"; }
+
+fast_model(){
+  local model
+  model=$([ -f "$STATE" ] && grep -m1 . "$STATE" 2>/dev/null || true)
+  case "$model" in
+    ""|claude-sonnet-4.6|anthropic/claude-sonnet-4.6) echo "$FAST_DEFAULT";;
+    *) echo "$model";;
+  esac
+}
+
+flagship(){
+  # the model the bulk of agents currently use (mode), excluding the fast ones
+  grep -hoE 'model:\s*kimi-coding/[a-z0-9.-]+' "$AGENTS"/*.md 2>/dev/null \
+    | sed 's|model:\s*kimi-coding/||' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}'
+}
+
+have_model(){ grep -q "\"id\":\s*\"$1\"" "$MODELS_JSON" 2>/dev/null; }
+
+set_model(){ # $1=agent file, $2=model-id
+  sed -i -E "s|^model:\s*kimi-coding/.*$|model: $PROVIDER/$2|" "$1"
+}
+
+is_fast_agent(){ local a="$1"; for x in "${FAST_AGENTS[@]}"; do [ "$x" = "$a" ] && return 0; done; return 1; }
+is_elite_agent(){ local a="$1"; for x in "${ELITE_AGENTS[@]}"; do [ "$x" = "$a" ] && return 0; done; return 1; }
+
+status(){
+  local n=0 nf=0 ne=0
+  printf '  %-26s %s\n' "AGENT" "MODEL"
+  for f in "$AGENTS"/*.md; do
+    local a m; a=$(basename "$f" .md); m=$(grep -m1 -oE 'kimi-coding/[a-z0-9.-]+' "$f" | sed 's|kimi-coding/||')
+    if is_fast_agent "$a"; then printf '  %-26s %s  (mechanical)\n' "$a" "$m"; nf=$((nf+1))
+    elif is_elite_agent "$a"; then printf '  %-26s %s  (elite)\n' "$a" "$m"; ne=$((ne+1))
+    else printf '  %-26s %s\n' "$a" "$m"; fi
+    n=$((n+1))
+  done
+  echo "  fast model = $(fast_model) | flagship = $(flagship) | $n agents ($nf mechanical, $ne elite)"
+}
+
+case "${1:-status}" in
+  on)
+    FM="$(fast_model)"; FL="$(flagship)"
+    have_model "$FM" || { err "fast model '$FM' not in models.json"; exit 1; }
+    for f in "$AGENTS"/*.md; do
+      a=$(basename "$f" .md)
+      if is_fast_agent "$a"; then set_model "$f" "$FM"
+      elif is_elite_agent "$a"; then set_model "$f" "$ELITE_DEFAULT"
+      else set_model "$f" "$FL"; fi
+    done
+    ok "tiering ON: ${#FAST_AGENTS[@]} mechanical -> $FM | ${#ELITE_AGENTS[@]} elite -> $ELITE_DEFAULT | rest -> $FL"
+    status
+    ;;
+  off)
+    FL="$(flagship)"
+    for f in "$AGENTS"/*.md; do
+      a=$(basename "$f" .md)
+      if is_elite_agent "$a"; then set_model "$f" "$ELITE_DEFAULT"
+      elif ! is_fast_agent "$a"; then set_model "$f" "$FL"; fi
+    done
+    ok "tiering OFF: mechanical agents -> $FL | elite stays $ELITE_DEFAULT"
+    status
+    ;;
+  set-fast)
+    [ -n "${2:-}" ] || { err "usage: pi-tier set-fast <model-id>"; exit 1; }
+    have_model "$2" || { err "model '$2' not in models.json"; exit 1; }
+    echo "$2" > "$STATE"; ok "fast model = $2 (run 'pi-tier on' to apply)"
+    ;;
+  status|"") status;;
+  -h|--help|help) sed -n '2,18p' "$0" | sed 's/^#\s\?//';;
+  *) err "usage: pi-tier {on|off|status|set-fast <model>}"; exit 1;;
+esac

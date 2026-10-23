@@ -1,0 +1,51 @@
+# ------------------------------------------------------------------------------
+# pi-hunt — machine-local / runtime / secret / output directories
+# ------------------------------------------------------------------------------
+
+# Local agent / runtime state
+.pi/
+.browser-live/
+.codex/
+.junie/
+.agents/
+*.pid
+*.lock
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+gcp-oauth.keys.json
+
+# Build artifacts / logs
+*.log
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hunt output (user-specific)
+reports/
+recon-output/

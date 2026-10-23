@@ -1,0 +1,67 @@
+# pi-hunt — captured toolchain versions (source machine)
+# Match these (or newer compatible) on the new machine.
+# (Operational change-log history is maintained separately from this manifest.)
+
+=== RUNTIME / TOOLCHAIN ===
+OS                 : Linux (x86-64)
+node               : v22.22.3      # required for pi + MCP bridge + extensions (.ts)
+npm                : 10.9.8
+python3            : 3.13.7        # gateway venv (3.11+ works)
+pi (pi.dev)        : @earendil-works/pi-coding-agent@0.79.0   # npm global
+
+=== gateway (kiro-gateway/) ===
+fastapi
+uvicorn[standard]
+httpx[socks]
+loguru
+python-dotenv
+tiktoken
+pytest            # test-only
+pytest-asyncio    # test-only
+hypothesis        # test-only
+
+=== MCP SDK ===
+@modelcontextprotocol/sdk ^1.13.0
+
+=== SYSTEM TOOLS ===
+curl, git, rsync
+java               # burp MCP proxy jar (e.g. apt install default-jre)
+chromium           # browser-live (/usr/bin/chromium, or set BROWSER_LIVE_CHROME_BIN)
+fd                 # a prebuilt x86-64 fd is bundled at pi-agent/bin/fd; on a different
+                   # arch rebuild or install fd from your package manager
+kiro-cli           # gateway's auth source; install + `kiro-cli login`
+GITHUB_MCP_TOKEN   # github MCP (ghp_…) — pass to install.sh or edit mcp.json
+~/.gmail-mcp/      # gcp-oauth.keys.json + credentials.json for gmail MCP, then auth flow
+
+=== pi-hunt RAG + knowledge graph ===
+Component: rag/ (pihunt_rag package + techniques.yaml + install-rag.sh + README)
+Vectorization: model2vec potion-base-8M (256-d, CPU/numpy, ~30MB local snapshot)
+               with pure-numpy hashed-ngram fallback (zero-download, offline-safe)
+Store: SQLite at ~/.pi-hunt-rag/data/rag.db (float32 BLOB + numpy cosine; no faiss/chroma)
+Sources indexed: techniques + Memory MCP graph + past findings + model-notes
+MCP server: pihunt-rag (node stdio) -> wired in ~/.kiro/settings/mcp.json
+MCP tools: rag_search, rag_record_technique, rag_graph_add, rag_ingest, rag_stats
+CLI: pihunt-rag (~/.local/bin/pihunt-rag)
+venv: ~/.pi-hunt-rag/.venv (python -m venv --system-site-packages, reuses numpy)
+Coordinator wired: prompts/build.md startup step 1 + Tool selection section
+
+=== cost/perf optimization ===
+Model tiering: bin/pi-tier (on|off|status|set-fast). Mechanical agents
+  (h1-scope-loader, intigriti-scope-loader, recon, test-account-manager,
+   visual-security, payload-researcher) run on the fast tier; reasoning/
+   exploit/validation agents stay on the flagship. Composes with pi-4.8.
+Command optimization: pi-agent/extensions/cmd-optimizer (index.ts + optimize.ts).
+  tool_call hook augments ffuf/feroxbuster/gobuster/dirsearch/wfuzz/dnsx with
+  SecLists wordlists (mode-aware) + benign flags ONLY; everyday commands
+  (grep/ls/cat/curl/...) are never touched. Toggle PIHUNT_CMDOPT=0;
+  config ~/.pi-hunt-rag/data/cmdopt.json. Pure logic unit-tested.
+
+=== pi packages ===
+Installed via 'pi install npm:<pkg>' (pinned in pi-agent/settings.json 'packages'):
+  pi-casefile@1.3.8          offensive case tracker (bug bounty / CTF / audit)
+  pi-recon-tools@1.0.2       recon: headers/SSL/DNS/port-scan/fingerprint/paths
+  @artale/pi-pentest@1.0.0   nmap wrapper + vuln checks
+  pi-redteam@1.0.5           10 specialist security agents
+  @vigolium/piolium@0.0.11   multi-phase security audits, isolated-context subagents
+  pi-web-access@0.13.0       zero-config web search/fetch/scrape/PDF/clone
+install.sh step 2b installs them; they also auto-install from settings.json on first 'pi' run.
