@@ -59,10 +59,10 @@ DNS_WL="/usr/share/seclists/Discovery/DNS/subdomains-top1million-110000.txt"
 DIR_WL="/usr/share/seclists/Discovery/Web-Content/raft-large-directories.txt"
 FFUF_CAP="${RECON_FFUF_HOST_CAP:-8}"
 RAG_HOME="${PIHUNT_RAG_HOME:-$HOME/.pi-hunt-rag}"
-# Locate the rag package: env override, else next to this script's repo, else common installs.
+# Locate the rag package: env override, else fallback candidates, else common installs.
 _self_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 RAG_REPO=""
-for cand in "${PIHUNT_RAG_REPO:-}" "$_self_dir/../rag" "$_self_dir/rag" "$HOME/Documents/ai/pi-Hunt/pi-hunt-restore/rag" "$HOME/pi-hunt/rag" "$HOME/tools/pi-hunt/rag"; do
+for cand in "${PIHUNT_RAG_REPO:-}" "$_self_dir/../rag" "$_self_dir/rag" "$HOME/Desktop/Desktop/harness/rag" "$HOME/Documents/ai/pi-Hunt/pi-hunt-restore/rag" "$HOME/pi-hunt/rag" "$HOME/tools/pi-hunt/rag"; do
   [ -n "$cand" ] && [ -f "$cand/pihunt_rag/recon_ingest.py" ] && { RAG_REPO="$(cd "$cand" && pwd)"; break; }
 done
 

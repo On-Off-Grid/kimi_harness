@@ -324,10 +324,10 @@ PIHUNT_LEARNING=0             # disable · PIHUNT_LEARNING_THRESHOLD tunes promo
 An 11-stage recon engine (ASN/IP-space first → subdomain enum → DNS brute →
 resolution + dangling-CNAME takeover flags → port scan → HTTP probe →
 screenshots (deep) → crawl + URLs → param discovery → content discovery →
-JS/secret mine — via **jsleak**: a 784-pattern secret sweep + LinkFinder-style
-endpoint mining over collected JS, detector-name-filtered to cut noise, with a
-hardcoded-regex fallback; `trufflehog --only-verified` (deep) stays the strong
-verifier) that writes normalized artifacts under
+JS/secret mine. The final stage runs **jsleak**: a 784-pattern secret sweep +
+LinkFinder-style endpoint mining over collected JS (detector-name-filtered to
+cut noise, hardcoded-regex fallback; `trufflehog --only-verified` in deep mode
+stays the strong verifier). It writes normalized artifacts under
 `reports/<program>/structured-recon/`, **diffs each run against the previous one**
 (`anew`) so "NEW since last run" surfaces, and re-ingests everything into the
 RAG so hunts always start from current data.
