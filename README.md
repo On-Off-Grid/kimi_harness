@@ -128,9 +128,11 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $INTIGRITI_TO
 mkdir -p ~/.gmail-mcp   # drop gcp-oauth.keys.json + credentials.json here
 npx @gongrzhe/server-gmail-autoauth-mcp auth
 
-# 6. Burp (optional): Burp Suite + the AI-Agent extension listening on
-#    127.0.0.1:9876, and the proxy jar at ~/.BurpSuite/mcp-proxy/mcp-proxy-all.jar.
-#    ⚠️ LAUNCH BURP BEFORE pi-hunt — the bridge attaches to Burp at session startup.
+# 6. Burp (optional): Burp Suite + the official PortSwigger "MCP Server"
+#    extension (burp-mcp-all.jar, added via Extender -> Add). In Burp's MCP tab:
+#    Host 127.0.0.1, Port 9876, Enabled ON (Output tab shows "Started MCP server").
+#    The bridge connects directly to that SSE server — no proxy jar needed.
+#    ⚠️ LAUNCH BURP BEFORE pi-hunt — the bridge attaches at session startup.
 
 # 7. Lock down every key file (none should be world-readable):
 chmod 600 ~/.keys_secrets/*.txt ~/.pi/secrets/*.env ~/.config/pihunt/*.env
@@ -385,7 +387,7 @@ subfinder's provider-config plus `GITHUB_TOKEN` for ~28% more subdomains.
 | auth/model error from `kimi-coding` | key must be present in BOTH `~/.pi/agent/auth.json` and `~/.pi/secrets/kimi.env`; test: `pi --model kimi-coding/k3 -p "say pong"` |
 | model id not found (`k3`, `k3-256k`, …) | `~/.pi/agent/models.json` must merge those ids into the built-in `kimi-coding` provider |
 | an MCP server failed at launch | servers attach only at session start — fix `~/.pi/agent/mcp.json` (paths/deps/token) and restart the session |
-| Burp MCP "Not connected" | launch Burp Suite (AI-Agent extension on `127.0.0.1:9876`) **before** `pi-hunt` |
+| Burp MCP "Not connected" | launch Burp (MCP tab: Enabled ON, host 127.0.0.1 port 9876) **before** `pi-hunt`; the bridge now talks to Burp's SSE server directly (no proxy jar) |
 | GitHub MCP 401 / credential expired | refresh the token in `~/.pi/secrets/github_mcp.env` and relaunch |
 | HackerOne 401 | same token pair in `~/.pi/secrets/h1_api.env` *and* `~/.config/pihunt/h1.env`; test: `curl -su "$H1_USER:$H1_API" https://api.hackerone.com/v1/me` |
 | scope loaders return empty results | usually an expired platform token — verify each curl check; empty scope silently degrades the hunt |

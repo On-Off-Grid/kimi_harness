@@ -13,14 +13,7 @@
       "disabled": false
     },
     "burp": {
-      "command": "/usr/bin/java",
-      "args": [
-        "-Xmx256m",
-        "-jar",
-        "__PIHUNT_HOME__/.BurpSuite/mcp-proxy/mcp-proxy-all.jar",
-        "--sse-url",
-        "http://127.0.0.1:9876"
-      ],
+      "url": "http://127.0.0.1:9876",
       "timeout": 60000,
       "disabled": false
     },
