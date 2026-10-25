@@ -98,7 +98,7 @@ cat <<EOF
  pi-hunt is installed${DRY:+ (dry-run — nothing changed)}.
 
  Next (one-time, machine-specific):
-   Configure OpenRouter authentication locally for Pi. The repository does not carry keys.
+   Configure Kimi Code (and Google AI Studio for the mechanical tier) locally. The repository does not carry keys.
    # GitHub MCP token, Gmail OAuth, Burp app — see README "Post-install"
 
  Make sure ~/.local/bin is on PATH, then:

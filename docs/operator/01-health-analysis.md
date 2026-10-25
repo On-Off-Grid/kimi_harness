@@ -1,10 +1,11 @@
 # pi-hunt — Historical Kiro Health Analysis & Diagnostics
 
 > [!WARNING]
-> Historical Kiro-era snapshot. The active runtime now calls OpenRouter directly:
-> `anthropic/claude-opus-4.8` flagship, `anthropic/claude-sonnet-5` helper tier,
-> and `anthropic/claude-sonnet-4.6` for compaction. Gateway health commands below
-> are reference material, not the current startup procedure.
+> Historical Kiro-era snapshot. The active runtime uses Kimi Code:
+> `kimi-coding/k3` flagship, `kimi-coding/k3.1-pro` elite,
+> `google-direct/gemini-3.1-flash-lite` mechanical tier, and
+> `kimi-coding/k3-256k` for compaction. Gateway health commands below are
+> reference material, not the current startup procedure.
 
 _Last verified: 2026-07-07 on this box (12 cores / 15 GB RAM, ~8 GB free)._
 
@@ -23,12 +24,12 @@ commands here whenever a session starts cold, after a reboot, or when recon outp
 
 | Component | Healthy state | How to check |
 |---|---|---|
-| **OpenRouter config** | `defaultProvider: openrouter`, default `anthropic/claude-opus-4.8` | inspect `~/.pi/agent/{models,settings}.json` |
+| **Provider config** | `defaultProvider: kimi-coding`, default `k3`; mechanical `google-direct/gemini-3.1-flash-lite` | inspect `~/.pi/agent/{models,settings}.json` |
 | **Launchers** | `pi-hunt`, `pi-4.8`, `pi-tier`; `pi-kiro` is legacy-only | `ls $PIHUNT_HOME/bin/` |
-| **Agents** | 25 installed (`~/.pi/agent/agents/*.md`) | `ls ~/.pi/agent/agents/ | wc -l` |
-| **Model tiering** | 7 helper → `anthropic/claude-sonnet-5`, 18 flagship → `anthropic/claude-opus-4.8` | `pi-tier status` |
-| **Skills** | 9 skills, 0 errors/warnings | `node pi-hunt/scripts/skills-health.js --skills-root ~/.kiro/skills` |
-| **MCP servers** | 7 wired: browser-live, burp, memory, github, medium, pihunt-rag, gmail | `cat pi-hunt/kiro-settings/mcp.json` / `/mcp` inside pi |
+| **Agents** | 26 installed (`~/.pi/agent/agents/*.md`) | `ls ~/.pi/agent/agents/ | wc -l` |
+| **Model tiering** | 8 mechanical → `google-direct/gemini-3.1-flash-lite`, 16 flagship → `kimi-coding/k3`, 2 elite → `kimi-coding/k3.1-pro` | `pi-tier status` |
+| **Skills** | 17 skills, gate green | `node bin/prompt-gate.mjs --repo` |
+| **MCP servers** | 7 wired: browser-live, burp, memory, github, medium, pihunt-rag, gmail | `cat ~/.pi/agent/mcp.json` / `/mcp` inside pi |
 | **RAG** | `total` climbs; `by_source` has findings + techniques + memory + recon | `pihunt-rag stats` |
 | **Recon toolchain** | 27/27 tools resolve under a **clean** PATH | see §3 test |
 | **Recon registry** | active programs listed (not "(none)") | `pihunt-recon-reg list` |
@@ -48,7 +49,7 @@ PH=$PIHUNT_HOME
 echo "== gateway =="; systemctl --user is-active kiro-gateway; curl -s -m3 http://127.0.0.1:8790/health
 echo "== agents =="; ls ~/.pi/agent/agents/*.md 2>/dev/null | wc -l
 echo "== tiering =="; make -C "$PH" status 2>/dev/null | tail -3
-echo "== skills =="; node "$PH/scripts/skills-health.js" --skills-root ~/.kiro/skills 2>&1 | head -2
+echo "== skills =="; ls ~/.pi/agent/skills/*/SKILL.md 2>/dev/null | wc -l
 echo "== rag =="; pihunt-rag stats 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['total'],'total',d['by_source'])"
 echo "== recon registry =="; pihunt-recon-reg list | tail -8
 echo "== recon timer =="; systemctl --user list-timers 2>/dev/null | grep -i pihunt || echo "NO TIMER"

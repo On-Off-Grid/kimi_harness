@@ -2,7 +2,8 @@
 
 > [!IMPORTANT]
 > The host-specific measurements below are historical. The provider migration is
-> complete: direct OpenRouter is the default path; Kiro gateway assets are retained
+> complete: Kimi Code is the default path (`k3` flagship, `k3.1-pro` elite,
+> `google-direct/gemini-3.1-flash-lite` mechanical); Kiro gateway assets are retained
 > only as legacy/reference material.
 
 _Snapshot: 2026-07-07. This is the stepping-stone document: where pi-hunt stands
@@ -15,18 +16,17 @@ material change so the next session starts from truth, not memory._
 
 - **Host:** 12 cores / 15 GB RAM (~8 GB free). Bigger than the 4-core/8-GB defaults
   the runner assumes — tuning has been raised to match (see §3).
-- **Coordinator:** `pi-hunt` launcher → direct OpenRouter on
-  `anthropic/claude-opus-4.8`, max reasoning
+- **Coordinator:** `pi-hunt` launcher → Kimi Code `kimi-coding/k3`, max reasoning
   (`xhigh`, 60k thinking budget), auto-continue watchdog + compact-on-46 empty-trigger
   enabled.
-- **Agents:** 25 specialists installed (`~/.pi/agent/agents/`). Tiering active — 7
-  helper agents on `anthropic/claude-sonnet-5`, 18 reasoning agents on
-  `anthropic/claude-opus-4.8`; compaction summarizes with
-  `anthropic/claude-sonnet-4.6`.
+- **Agents:** 26 specialists installed (`~/.pi/agent/agents/`). Tiering active — 8
+  mechanical agents on `google-direct/gemini-3.1-flash-lite`, 16 flagship agents on
+  `kimi-coding/k3`, 2 elite agents on `kimi-coding/k3.1-pro`; compaction summarizes
+  with `kimi-coding/k3-256k`.
 - **MCP servers (7):** browser-live, burp, memory, github (remote), medium,
   pihunt-rag, gmail.
-- **Skills (9):** all clean (0 errors/warnings).
-- **Provider:** direct OpenRouter Anthropic Messages API. `kiro-gateway/` remains
+- **Skills (17):** gate green (`make prompts-check`).
+- **Provider:** Kimi Code + Google direct (mechanical tier). `kiro-gateway/` remains
   legacy/reference-only and is not started by the default launcher.
 
 ### Durable state layers (all must agree)

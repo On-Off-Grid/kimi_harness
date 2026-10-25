@@ -4,10 +4,10 @@
 
 ### Autonomous bug-bounty hunting harness for the [pi](https://pi.dev) coding agent
 
-*A coordinator + 26 specialist sub-agents, Kimi Code subscription models, 7 local MCP servers, a vectorized knowledge base with nightly recon, and cost-tiered model routing — wired together for end-to-end, evidence-first vulnerability research.*
+*A coordinator + 26 specialist sub-agents, Kimi Code + Google direct models, 7 local MCP servers, a vectorized knowledge base with nightly recon, and cost-tiered model routing — wired together for end-to-end, evidence-first vulnerability research.*
 
 ![pi](https://img.shields.io/badge/agent-pi.dev-6b46c1)
-![model](https://img.shields.io/badge/model-Kimi%20K3%20%7C%20K3.1%20Pro-d97757)
+![model](https://img.shields.io/badge/model-Kimi%20K3%20%7C%20Gemini%20Flash%20Lite-d97757)
 ![platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-1f2937)
 ![shell](https://img.shields.io/badge/shell-bash-4eaa25?logo=gnubash&logoColor=white)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
@@ -230,9 +230,9 @@ default runtime path.
 | `pi-agent/` | `~/.pi/agent/` | `models.json`, `settings.json`, **26 agents**, extensions (subagent ensemble/swarm, mcp-bridge, auto-continue, compact-on-46, **cmd-optimizer**, session-memory, **continuous-learning**), coordinator prompt, steering + MCP config |
 | `rag/` | `~/.pi-hunt-rag/` + `~/opencode/pihunt-rag-mcp/` | **RAG + knowledge graph** — vectorized search, techniques KB, MCP server ([details](rag/README.md)) |
 | `kiro-gateway/` | — | Legacy Anthropic↔Kiro bridge retained for historical/reference use only |
-| `kiro-settings/mcp.json` | `~/.pi/agent/mcp.json` | MCP config template (`${GITHUB_MCP_TOKEN}` placeholder) — deployed with real paths to the bridge's first search location |
+| `mcp-config/mcp.json` | `~/.pi/agent/mcp.json` | MCP config template (`${GITHUB_MCP_TOKEN}` placeholder) — deployed with real paths to the bridge's first search location |
 | `mcp-servers/` | various | browser-live, chrome-devtools, medium-rss, burp-proxy, pihunt-rag server code |
-| `skills/` | `~/.pi/agent/skills/` | 9 skills: auth-attack-patterns, business-impact, chain-patterns, critical-endpoints, framework-exploits, recon-checklist, security-bounty-hunter, source-review, writeup-intel |
+| `skills/` | `~/.pi/agent/skills/` | **17 skills** (source of truth: `skills/manifest.json`): recon (arsenal/checklist), auth/ATO, IDOR, race, SSRF, chain metrics/patterns, deep-research memory, wordlist sourcing, source review, framework exploits, business impact, writeup intel |
 | `steering/`, `prompts/` | `~/.pi/agent/steering/`, `~/.config/opencode/…` | workflow rules + the coordinator brain |
 | `systemd/` | `~/.config/systemd/user/` | **nightly/6h recon auto-run** (`pihunt-recon` service + timer) with its own synced env files |
 | `extras.sh` | — | optional recon toolchain installer (httpx, katana, dnsx, naabu, subfinder, nuclei, ffuf, sqlmap, gau, git-dumper, **SecLists**, …) |
@@ -264,7 +264,7 @@ Mechanical agents run on a cheaper **fast** model; reasoning/exploit/validation 
 
 | Tier | Agents | Default model |
 |---|---|---|
-| ⚙️ helper (mechanical) | h1/intigriti/yeswehack scope-loaders, recon, test-account-manager, visual-security, payload-researcher, wordlist-curator | `kimi-coding/k3-256k` |
+| ⚙️ mechanical | h1/intigriti/yeswehack scope-loaders, recon, test-account-manager, visual-security, payload-researcher, wordlist-curator | `google-direct/gemini-3.1-flash-lite` |
 | 🧠 flagship (reasoning) | coordinator + 16 remaining specialists | `kimi-coding/k3` |
 | 🏆 elite (validation/redteam) | strict-triager, hypothesis-redteam | `kimi-coding/k3.1-pro` |
 
@@ -272,16 +272,18 @@ Large-context compaction uses `kimi-coding/k3-256k` as its summarizer (`COMPACT_
 
 ```bash
 pi-tier on      # apply        pi-tier status              # show
-pi-tier off     # mechanicals->flagship      pi-tier set-fast <model>   # change fast model
+pi-tier off     # mechanicals->flagship      pi-tier set-fast <provider/model>   # change fast model
 ```
 
 Composes with `pi-4.8`: `off` is the conservative default (`k3` flagship), `on`
 upgrades the flagship tier *and* the coordinator/defaultModel to `k3.1-pro` for
-max-quality pushes. The elite pair is **always** pinned to `k3.1-pro`.
+max-quality pushes. The elite pair is **always** pinned to `k3.1-pro`. `pi-4.8`
+only rewrites `kimi-coding/*` agent lines, so the mechanical Gemini tier is
+unaffected; `pi-tier off` intentionally flattens it to the flagship.
 
 > 💡 A local **Ollama** provider is pre-registered in `models.json`
 > (`http://localhost:11434/v1`) with placeholder model ids — swap in your
-> upgraded local models and `pi-tier set-fast <id>` for a $0 mechanical tier.
+> upgraded local models and `pi-tier set-fast ollama/<model-id>` for a $0 mechanical tier.
 
 ### 2. Command optimization — `cmd-optimizer` extension
 
@@ -356,8 +358,8 @@ subfinder's provider-config plus `GITHUB_TOKEN` for ~28% more subdomains.
 | Env / file | Purpose |
 |---|---|
 | `~/.pi/agent/settings.json` | default provider/model (`kimi-coding`/`k3`), thinking level (`xhigh`), skills dir, retries, compaction |
-| `~/.pi/agent/models.json` | Kimi model catalog merged into the built-in `kimi-coding` provider + Ollama local placeholder |
-| `~/.pi/agent/mcp.json` | deployed MCP server config (from `kiro-settings/mcp.json`) |
+| `~/.pi/agent/models.json` | Kimi catalog + `google-direct/gemini-3.1-flash-lite` (mechanical tier) + Ollama placeholder; provider keys live in `auth.json` |
+| `~/.pi/agent/mcp.json` | deployed MCP server config (from `mcp-config/mcp.json`) |
 | `~/.pi/secrets/*.env` | credentials: kimi, github_mcp, h1_api, intigriti, tuning — **keep `chmod 600`** |
 | `~/.config/pihunt/*.env` | platform/recon envs synced for login shells + systemd units — **keep `chmod 600`** |
 | `~/.pi-hunt-rag/data/cmdopt.json` | command-optimizer rules |
@@ -385,7 +387,7 @@ subfinder's provider-config plus `GITHUB_TOKEN` for ~28% more subdomains.
 |---|---|
 | `pi-hunt: command not found` | add `~/.local/bin` to `PATH` (see [Post-install](#post-install-one-time)) |
 | auth/model error from `kimi-coding` | key must be present in BOTH `~/.pi/agent/auth.json` and `~/.pi/secrets/kimi.env`; test: `pi --model kimi-coding/k3 -p "say pong"` |
-| model id not found (`k3`, `k3-256k`, …) | `~/.pi/agent/models.json` must merge those ids into the built-in `kimi-coding` provider |
+| model id not found (`k3`, `k3-256k`, `gemini-3.1-flash-lite`, …) | `~/.pi/agent/models.json` must declare the id under its provider (`kimi-coding`, `google-direct`) |
 | an MCP server failed at launch | servers attach only at session start — fix `~/.pi/agent/mcp.json` (paths/deps/token) and restart the session |
 | Burp MCP "Not connected" | launch Burp (MCP tab: Enabled ON, host 127.0.0.1 port 9876) **before** `pi-hunt`; the bridge now talks to Burp's SSE server directly (no proxy jar) |
 | GitHub MCP 401 / credential expired | refresh the token in `~/.pi/secrets/github_mcp.env` and relaunch |

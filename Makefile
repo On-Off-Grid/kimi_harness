@@ -31,7 +31,7 @@ hooks: ## Install the git hooks (committed in .githooks/)
 token-report: ## Per-agent before/after token table
 	@node bin/tally.mjs
 
-install: ## Install the OpenRouter runtime (agents, MCPs, prompts, RAG)
+install: ## Install the Kimi Code runtime (agents, MCPs, prompts, RAG)
 	@bash install.sh
 
 full: ## Install framework + recon CLIs & SecLists (needs sudo)

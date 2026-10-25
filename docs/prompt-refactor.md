@@ -284,8 +284,8 @@ installer's deploy list, and reverse drift (deployed files with no source).
 Disposition: **materialized and verified deployed**. The content exists — it is the memory
 protocol factored out of the old deep-research prompt — at `skills/deep-research-memory/SKILL.md`.
 It is now listed in `skills/manifest.json`, deployed by the installer to `~/.pi/agent/skills/`
-(the runtime path) and `~/.kiro/skills/`, verified byte-identical in both, and the emitted agent
-points at exactly `skills/deep-research-memory/SKILL.md`.
+(the runtime path), verified byte-identical there, and the emitted agent points at exactly
+`skills/deep-research-memory/SKILL.md`. The legacy `~/.kiro/skills/` mirror was retired in §9.7.
 
 Full resolution table (repo + manifest + deployed; every row `OK/OK/OK`):
 
@@ -384,3 +384,28 @@ No hunter delta was weakened by this close-out. The only prompt edits were the t
 deltas over their authored budget (`test-account-manager`, `wordlist-curator`), and the two
 mechanical scope loaders trimmed by a few tokens to clear <400; every capability and every
 safety invariant is intact (gate enforces both).
+
+### 9.7 Legacy `.kiro` deploy surface retired
+
+The runtime never read `~/.kiro/skills`: `~/.pi/agent/settings.json` declares
+`skills: ["~/.pi/agent/skills"]`, and `mcp-bridge` already prefers
+`~/.pi/agent/mcp.json`. The installer still wrote three legacy destinations, so the
+gate had to keep a second surface honest. All three are now retired:
+
+| legacy target | runtime reader | disposition |
+|---|---|---|
+| `~/.kiro/skills` | `~/.pi/agent/skills` | removed from `install.sh` and `skills/manifest.json`; local copy archived |
+| `~/.kiro/steering` | `~/.pi/agent/steering` (`bin/pi-hunt`) | installer now deploys to the runtime path |
+| `~/.kiro/settings/mcp.json` | `~/.pi/agent/mcp.json` (`mcp-bridge` primary) | installer + RAG now write the primary; `.kiro` remains a read-only fallback |
+
+`skills/manifest.json` now has a single deploy destination. The gate additionally
+fails if a `.kiro` destination reappears in the manifest, or if `install.sh` rsyncs
+skills to a destination that is not declared in `deploy[]`. The self-test includes a
+negative case for the legacy destination, so the retirement is enforced, not just
+documented.
+
+The shipped provider set is now explicit in `pi-agent/models.json`: 16 flagship
+agents on `kimi-coding/k3`, 2 elite on `kimi-coding/k3.1-pro`, and 8 mechanical on
+`google-direct/gemini-3.1-flash-lite`. `pi-tier` is provider-aware and defaults its
+fast ref to the Gemini model; `pi-4.8` only rewrites `kimi-coding/*` lines, so it
+cannot disturb the mechanical tier.
