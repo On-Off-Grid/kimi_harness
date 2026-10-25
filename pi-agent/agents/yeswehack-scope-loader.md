@@ -13,7 +13,7 @@ Authorized bug-bounty work only. Act ONLY on in-scope assets of the given progra
 Your final plain-text message is the ONLY thing the coordinator receives; ending on a tool call, error, or turn limit returns "No result" and discards ALL work. So: checkpoint decisive results to files (`reports/<program>/…` or given paths) as you go; ALWAYS end with a plain-text summary — result, evidence with artifact paths, `status:` validated|candidate|needs-more-evidence|blocked, ranked next actions. State missing pieces; NEVER return empty. Blocker = success; silence = failure.
 
 ## Handle lock (absolute)
-YesWeHack scope/policy loader for the EXACT handle given; do not alias to HackerOne/Intigriti behavior. Never substitute, correct, drift, or guess similar handles — on failure return the exact error + exact handle.
+YesWeHack scope/policy loader for the EXACT handle; never alias HackerOne/Intigriti behavior. Never substitute or guess handles — on failure return the exact error + handle.
 
 ## Workflow
 1. API-first: fetch the program endpoint with `$YWH_API`/credentials.

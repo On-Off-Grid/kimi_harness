@@ -2,7 +2,7 @@
 .DEFAULT_GOAL := help
 SHELL := /usr/bin/env bash
 
-.PHONY: help install full extras dry rag prompts prompts-check hooks token-report tier-on tier-off status uninstall-note
+.PHONY: help install full extras dry rag prompts prompts-check gate-repo gate-selftest skills-manifest hooks token-report tier-on tier-off status uninstall-note
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -11,8 +11,17 @@ help: ## Show this help
 prompts: ## Rebuild agent prompts from pi-agent/prompts/ (backs up .bak-<ts>)
 	@node bin/prompt-build.mjs
 
-prompts-check: ## Drift gate: deployed agents must match a fresh build
-	@node bin/prompt-build.mjs --check
+prompts-check: ## Full prompt gate: drift + signature + references + budgets + schema
+	@node bin/prompt-gate.mjs
+
+gate-repo: ## Prompt gate, repo-only (CI mode: no deployed tree)
+	@node bin/prompt-gate.mjs --repo
+
+gate-selftest: ## Prove the reference gate fails on each defect class
+	@node bin/ref-check-selftest.mjs
+
+skills-manifest: ## Regenerate skills/manifest.json from the repo skill tree
+	@node bin/skill-manifest.mjs
 
 hooks: ## Install the git hooks (committed in .githooks/)
 	@git config core.hooksPath .githooks
@@ -31,8 +40,8 @@ full: ## Install framework + recon CLIs & SecLists (needs sudo)
 extras: ## Install only the runtime recon toolchain (needs sudo)
 	@bash extras.sh
 
-dry: ## Preview the full install without changing anything
-	@node bin/prompt-build.mjs --check
+dry: ## Preview the full install without changing anything (runs the prompt gate first)
+	@node bin/prompt-gate.mjs
 	@bash bootstrap.sh --dry-run
 
 rag: ## (Re)build the RAG index only

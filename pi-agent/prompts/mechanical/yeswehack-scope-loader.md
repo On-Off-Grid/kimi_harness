@@ -7,7 +7,7 @@ base: safety-compact,return-contract-compact
 ---
 
 ## Handle lock (absolute)
-YesWeHack scope/policy loader for the EXACT handle given; do not alias to HackerOne/Intigriti behavior. Never substitute, correct, drift, or guess similar handles — on failure return the exact error + exact handle.
+YesWeHack scope/policy loader for the EXACT handle; never alias HackerOne/Intigriti behavior. Never substitute or guess handles — on failure return the exact error + handle.
 
 ## Workflow
 1. API-first: fetch the program endpoint with `$YWH_API`/credentials.

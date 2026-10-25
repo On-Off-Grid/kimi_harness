@@ -9,12 +9,22 @@
  *   - hunters confirm scope LIVE (scope section present)
  *   - the caller's return contract is present (a silent run loses everything)
  *
- *   node bin/signature-check.mjs
+ * Content only. Reference resolution lives in bin/ref-check.mjs; both are run by
+ * bin/prompt-gate.mjs.
+ *
+ *   node bin/signature-check.mjs            # repo mirror + deployed tree (when present)
+ *   node bin/signature-check.mjs --repo     # repo mirror only (CI)
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const AG = path.join(process.env.HOME, ".pi", "agent", "agents");
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const HOME = process.env.HOME;
+const TREES = [["repo", path.join(REPO, "pi-agent", "agents")]];
+const deployed = path.join(HOME, ".pi", "agent", "agents");
+if (!process.argv.includes("--repo") && fs.existsSync(deployed)) TREES.push(["deployed", deployed]);
+
 const HUNTERS = {
   "bypass-innovator": [["WAF", /WAF/i], ["CSP", /CSP/i], ["parser-level behaviour", /parser/i]],
   "cache-poison-hunter": [["unkeyed input", /unkeyed/i], ["cache deception", /web cache deception/i], ["poisoning", /poison/i]],
@@ -40,48 +50,35 @@ const ALL = ["h1-scope-loader", "intigriti-scope-loader", "yeswehack-scope-loade
   "test-account-manager", "visual-security", "wordlist-curator", ...Object.keys(HUNTERS)];
 
 let fails = 0;
-const bad = (name, msg) => { fails++; console.log(`  FAIL  ${name}: ${msg}`); };
+const bad = (scope, msg) => { fails++; console.log(`  FAIL  ${scope}: ${msg}`); };
 
-console.log("== signature behaviours (pre-registered, per hunter)");
-for (const [name, sigs] of Object.entries(HUNTERS)) {
-  const f = path.join(AG, name + ".md");
-  if (!fs.existsSync(f)) { bad(name, "deployed file missing"); continue; }
-  const t = fs.readFileSync(f, "utf8");
-  const lost = sigs.filter(([, re]) => !re.test(t)).map(([label]) => label);
-  console.log(`  ${lost.length ? "FAIL" : "PASS"}  ${name.padEnd(24)} ${sigs.length - lost.length}/${sigs.length}${lost.length ? "  lost: " + lost.join(", ") : ""}`);
-  if (lost.length) fails++;
-}
+for (const [label, dir] of TREES) {
+  console.log(`\n== ${label}: ${dir.replace(HOME, "~")}`);
 
-console.log("\n== safety invariants (all agents)");
-for (const name of ALL) {
-  const f = path.join(AG, name + ".md");
-  if (!fs.existsSync(f)) { bad(name, "deployed file missing"); continue; }
-  const t = fs.readFileSync(f, "utf8");
-  const body = t.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  const heads = [...body.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1]);
-  const first = heads[0] || "";
-  if (!/authori[sz]ed testing/i.test(first)) bad(name, `first section is "${first}" (expected authorised-testing/scope-compliance)`);
-  if (/return contract/i.test(first)) bad(name, "safety section displaced by return contract");
-  if (!/return contract/i.test(body)) bad(name, "missing return contract");
-  if (HUNTERS[name] && !/confirm scope live/i.test(body)) bad(name, "missing mandatory LIVE scope confirmation");
-}
-console.log("\n== offloaded skill pointers resolve");
-{
-  const repoSkills = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "skills");
-  const depSkills = path.join(process.env.HOME, ".pi/agent/skills");
-  let seen = 0;
-  for (const name of ALL) {
-    const f = path.join(AG, name + ".md");
-    if (!fs.existsSync(f)) continue;
-    for (const m of fs.readFileSync(f, "utf8").matchAll(/skills\/([a-z0-9-]+)\/SKILL\.md/g)) {
-      seen++;
-      const s = m[1];
-      if (!fs.existsSync(path.join(repoSkills, s, "SKILL.md"))) bad(name, `points at missing repo skill ${s}`);
-      if (!fs.existsSync(path.join(depSkills, s, "SKILL.md"))) bad(name, `points at undeployed skill ${s}`);
-    }
+  console.log(`-- signature behaviours (pre-registered, per hunter)`);
+  for (const [name, sigs] of Object.entries(HUNTERS)) {
+    const f = path.join(dir, name + ".md");
+    if (!fs.existsSync(f)) { bad(`${label}/${name}`, "agent file missing"); continue; }
+    const t = fs.readFileSync(f, "utf8");
+    const lost = sigs.filter(([, re]) => !re.test(t)).map(([sig]) => sig);
+    console.log(`  ${lost.length ? "FAIL" : "PASS"}  ${name.padEnd(24)} ${sigs.length - lost.length}/${sigs.length}${lost.length ? "  lost: " + lost.join(", ") : ""}`);
+    if (lost.length) fails++;
   }
-  console.log(`  ${seen} pointer(s) checked`);
+
+  console.log(`-- safety invariants`);
+  for (const name of ALL) {
+    const f = path.join(dir, name + ".md");
+    if (!fs.existsSync(f)) { bad(`${label}/${name}`, "agent file missing"); continue; }
+    const t = fs.readFileSync(f, "utf8");
+    const body = t.replace(/^---\n[\s\S]*?\n---\n?/, "");
+    const heads = [...body.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1]);
+    const first = heads[0] || "";
+    if (!/authori[sz]ed testing/i.test(first)) bad(`${label}/${name}`, `first section is "${first}" (expected authorised-testing/scope-compliance)`);
+    if (/return contract/i.test(first)) bad(`${label}/${name}`, "safety section displaced by return contract");
+    if (!/return contract/i.test(body)) bad(`${label}/${name}`, "missing return contract");
+    if (HUNTERS[name] && !/confirm scope live/i.test(body)) bad(`${label}/${name}`, "missing mandatory LIVE scope confirmation");
+  }
 }
 
-console.log(fails ? `\nSIGNATURE CHECK: FAIL (${fails})` : `\nSIGNATURE CHECK: PASS (${Object.keys(HUNTERS).length} hunters, ${ALL.length} agents)`);
+console.log(fails ? `\nSIGNATURE CHECK: FAIL (${fails})` : `\nSIGNATURE CHECK: PASS (${Object.keys(HUNTERS).length} hunters, ${ALL.length} agents × ${TREES.length} tree(s))`);
 process.exit(fails ? 1 : 0);

@@ -22,8 +22,13 @@ Counts are cl100k tokens of the **body only** (first frontmatter block excluded)
 subagent loader actually puts in the model's context. Regenerate the `after` column at any time:
 
 ```bash
+npm --prefix bin install   # once: real tiktoken (otherwise tsize estimates and says so)
 node bin/tally.mjs
 ```
+
+> Re-measured on 2026-10-25 after fixing a silent fallback in `bin/tsize.mjs` (an ES-module
+> strict-mode bug made every count a `bytes/4` estimate). `tokens.json` now holds true
+> `cl100k_base` counts for both columns; the numbers differ slightly from the first report.
 
 ## *.md snapshots — read the caveat
 

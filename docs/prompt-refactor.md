@@ -2,13 +2,14 @@
 
 Status: **shipped** (mechanical → flagship → elite, in that order).
 Sources: `pi-agent/prompts/{base,mechanical,flagship,elite}/`. Built by `bin/prompt-build.mjs`.
-Gate: `bin/prompt-build.mjs --check` (wire into `make dry` / pre-commit).
+Gate: `node bin/prompt-gate.mjs` (build drift + content/signature + reference resolution +
+budgets + schema). Wired into `make dry`, `.githooks/pre-commit`, and CI.
 
 ## 1. What changed
 
 Before, each of the 26 agents was a self-contained markdown file that repeated the same
 boilerplate (authorised-testing header, return contract, delegating rules, scope confirmation,
-output schema, stop conditions) inside every file. That is ~44 K tokens of duplicated text
+output schema, stop conditions) inside every file. That is ~38 K tokens of duplicated text
 across the fleet, plus ~11 KB of dead legacy frontmatter blocks (the loader only reads the
 first block).
 
@@ -45,65 +46,65 @@ deployed file now. Reproduce: `node bin/tally.mjs` (data in `pi-agent/prompts/ba
 
 | agent | class | before | after | Δ | % |
 |---|---|---:|---:|---:|---:|
-| h1-scope-loader | mechanical | 1922 | 619 | −1303 | −68% |
-| intigriti-scope-loader | mechanical | 1896 | 611 | −1285 | −68% |
-| payload-researcher | mechanical | 1262 | 510 | −752 | −60% |
-| recon | mechanical | 6214 | 856 | −5358 | −86% |
-| test-account-manager | mechanical | 1938 | 800 | −1138 | −59% |
-| visual-security | mechanical | 1374 | 593 | −781 | −57% |
-| wordlist-curator | mechanical | 1455 | 841 | −614 | −42% |
-| yeswehack-scope-loader | mechanical | 243 | 406 | +163 | +67% |
-| bypass-innovator | flagship | 1496 | 1303 | −193 | −13% |
-| cache-poison-hunter | flagship | 2974 | 2426 | −548 | −18% |
-| cve-misconfig-hunter | flagship | 1667 | 2347 | +680 | +41% |
-| deep-research | flagship | 5870 | 2902 | −2968 | −51% |
-| idor-logic-hunter | flagship | 4071 | 3186 | −885 | −22% |
-| injection-hunter | flagship | 3383 | 2803 | −580 | −17% |
-| llm-hunter | flagship | 3461 | 2907 | −554 | −16% |
-| oauth-hunter | flagship | 3359 | 2414 | −945 | −28% |
-| path-traversal-hunter | flagship | 2488 | 1945 | −543 | −22% |
-| race-condition-hunter | flagship | 3175 | 2327 | −848 | −27% |
-| rce-hunter | flagship | 3739 | 3163 | −576 | −15% |
-| request-smuggling-hunter | flagship | 2645 | 2106 | −539 | −20% |
-| security-analyzer | flagship | 3980 | 3361 | −619 | −16% |
-| sqli-hunter | flagship | 2453 | 1923 | −530 | −22% |
-| ssrf-hunter | flagship | 3801 | 3005 | −796 | −21% |
-| xss-hunter | flagship | 3831 | 3280 | −551 | −14% |
-| hypothesis-redteam | elite | 2163 | 2714 | +551 | +25% |
-| strict-triager | elite | 5008 | 4230 | −778 | −16% |
+| h1-scope-loader | mechanical | 1737 | 586 | −1151 | −66% |
+| intigriti-scope-loader | mechanical | 1738 | 588 | −1150 | −66% |
+| payload-researcher | mechanical | 1120 | 457 | −663 | −59% |
+| recon | mechanical | 6582 | 763 | −5819 | −88% |
+| test-account-manager | mechanical | 1728 | 706 | −1022 | −59% |
+| visual-security | mechanical | 1240 | 518 | −722 | −58% |
+| wordlist-curator | mechanical | 1574 | 584 | −990 | −63% |
+| yeswehack-scope-loader | mechanical | 219 | 351 | +132 | +60% |
+| bypass-innovator | flagship | 1378 | 1192 | −186 | −13% |
+| cache-poison-hunter | flagship | 2792 | 2240 | −552 | −20% |
+| cve-misconfig-hunter | flagship | 1688 | 2293 | +605 | +36% |
+| deep-research | flagship | 4987 | 2512 | −2475 | −50% |
+| idor-logic-hunter | flagship | 3707 | 2860 | −847 | −23% |
+| injection-hunter | flagship | 3209 | 2609 | −600 | −19% |
+| llm-hunter | flagship | 3067 | 2506 | −561 | −18% |
+| oauth-hunter | flagship | 3118 | 2225 | −893 | −29% |
+| path-traversal-hunter | flagship | 2347 | 1792 | −555 | −24% |
+| race-condition-hunter | flagship | 2812 | 2045 | −767 | −27% |
+| rce-hunter | flagship | 3708 | 3132 | −576 | −16% |
+| request-smuggling-hunter | flagship | 2522 | 1976 | −546 | −22% |
+| security-analyzer | flagship | 3682 | 3036 | −646 | −18% |
+| sqli-hunter | flagship | 2320 | 1781 | −539 | −23% |
+| ssrf-hunter | flagship | 3810 | 3014 | −796 | −21% |
+| xss-hunter | flagship | 3558 | 2983 | −575 | −16% |
+| hypothesis-redteam | elite | 1991 | 2479 | +488 | +25% |
+| strict-triager | elite | 4481 | 3733 | −748 | −17% |
 
 | class | before | after | Δ | % |
 |---|---:|---:|---:|---:|
-| mechanical (8) | 16,304 | 5,236 | −11,068 | **−68%** |
-| flagship (16) | 52,393 | 41,398 | −10,995 | **−21%** |
-| elite (2) | 7,171 | 6,944 | −227 | **−3%** |
-| **fleet (26)** | **75,868** | **53,578** | **−22,290** | **−29%** |
+| mechanical (8) | 15,938 | 4,553 | −11,385 | **−71%** |
+| flagship (16) | 48,705 | 38,196 | −10,509 | **−22%** |
+| elite (2) | 6,472 | 6,212 | −260 | **−4%** |
+| **fleet (26)** | **71,115** | **48,961** | **−22,154** | **−31%** |
 
 
 Three agents grew, deliberately (**corrective**, not regressions): `yeswehack-scope-loader` had
 no safety or return contract at all; `cve-misconfig-hunter` and `hypothesis-redteam` were
 missing the safety header, tool discipline, and stop conditions. They are now contract-complete.
 
-### Why the fleet is −29% and not −45…50%
+### Why the fleet is −31% and not −45…50%
 
 The 45–50% target assumes the duplication is a large fraction of the fleet. It is not: of the
-75,868 before-tokens, ~43.6 K were duplicated boilerplate and ~32 K were class-specific content.
-Replacing the boilerplate with a compact base costs 18 × 1,319 ≈ 23.7 K, because the mission
-*requires* those base sections (safety, LIVE scope, return contract, delegating, tool
+71,115 before-tokens, ~38 K were duplicated boilerplate and ~33 K were class-specific content.
+Replacing the boilerplate with a compact base costs 20.5 K (18 agents × ~1,140), because the
+mission *requires* those base sections (safety, LIVE scope, return contract, delegating, tool
 discipline, stop conditions, payload sourcing). Arithmetic floor:
 
 ```
-deltas (specialty, kept)        29.7 K   ← must stay: sinks, chain patterns, heuristics
-compact base (18 × 1.3 K)       23.7 K   ← mandated sections; removal would undo the techniques
+deltas (specialty, kept)        28.4 K   ← must stay: sinks, chain patterns, heuristics
+compact base (18 agents)        20.5 K   ← mandated sections; removal would undo the techniques
 -------------------------------------
-minimum honest total            53.6 K   → −29.4%
+minimum honest total            48.9 K   → −31.2%
 ```
 
-To reach −45% the base would have to shrink to ~470 tokens/agent — i.e. drop tool budgeting,
-stop conditions, and payload sourcing, which are the CL4R1T4S techniques this refactor was
-meant to *add*. Per the agreed rule, **the specialist stays sharp and we accept higher tokens**.
-Mechanicals (where duplication dominated) hit −68%; `recon` −86% (workflow-engine class, budget
-<2,000 instead of <400). Elite is −3% by design: boilerplate-only refactor, substance untouched.
+To reach −45% the base would have to shrink by ~half — i.e. drop tool budgeting, stop
+conditions, and payload sourcing, which are the CL4R1T4S techniques this refactor was meant to
+*add*. Per the agreed rule, **the specialist stays sharp and we accept higher tokens**.
+Mechanicals (where duplication dominated) hit −71%; `recon` −88% (workflow-engine class, budget
+<2,000 instead of <400). Elite is −4% by design: boilerplate-only refactor, substance untouched.
 
 ## 3. Signature behaviours (pre-registered → verified)
 
@@ -184,8 +185,11 @@ gates, emoji status systems, PR/commit disjunctions — irrelevant or harmful fo
 
 | gate | scope | result |
 |---|---|---|
+| `bin/prompt-gate.mjs` | all stages below, one command (also `--repo` for CI) | PASS 4/4 |
 | `bin/prompt-build.mjs --check` | 26 agents, deploy + repo mirror | PASS (no drift) |
 | `bin/signature-check.mjs` | 18 hunters ×3 signatures + 26 safety invariants | PASS |
+| `bin/ref-check.mjs` | 60 references/tree, 17 skills, installer coverage, reverse drift, budgets, schema | PASS |
+| `bin/ref-check-selftest.mjs` | 10 injected defect classes + clean fixture | PASS 11/11 |
 | `bin/prompt-smoke.py` | 8 mechanicals × 5 providers (gemini-3.1-flash-lite, gemini-3.5-flash-lite, codestral-latest, deepseek-v4-flash, allam-2-7b) | PASS on default provider + ≥1 alternate each |
 | `bin/elite-regression.sh` | strict-triager on labeled dup / known / novel set | PASS 3/3 (dup rejected with cited dup, known rejected as no-novelty, novel graded non-reject) |
 | `bin/hunter-signal-check.sh` | sqli / oauth / llm × (known-vuln, clean control) | PASS 6/6 — vuln reproduced with evidence + negative control; clean returned explicit NO-FINDING, no padding |
@@ -204,6 +208,7 @@ the vector names: a good hunter must discuss the vectors it tested while excludi
 | `skills/chain-metrics` | security-analyzer "Chain metrics hook" | opt-in (`CHAIN_METRICS=1`), inert by default |
 | `skills/deep-research-memory` | deep-research memory protocol | long protocol, loaded when researching |
 | `skills/recon-arsenal` | recon tooling | exact commands, one-liner pointers in recon |
+| `skills/wordlist-sourcing` | wordlist-curator source priority + tech→list map | reference table; curator stays under the <400 delta budget |
 
 Flow-critical cores were **not** offloaded (sink families, attack paths, gadget chaining,
 injection classes, desync families, authz matrix). Those drive step-by-step execution; moving
@@ -215,10 +220,17 @@ Deploy is a plain file write with a backup of the previous version:
 
 ```bash
 make prompts          # rebuild + deploy to ~/.pi/agent/agents + mirror pi-agent/agents
-make prompts-check    # fail on drift (also runs in `make dry` and the pre-commit hook)
+make prompts-check    # full gate: drift + signatures + references + budgets + schema
+make gate-repo        # same gate, repo-only (what CI runs)
+make gate-selftest    # prove the reference gate fails on each defect class
 make token-report     # before/after table
 make hooks            # install .githooks/pre-commit (core.hooksPath)
 ```
+
+`make prompts-check` is the **last** step of any prompt change. It runs the full gate; a
+dangling skill/file/tool reference, an undeployed skill, reverse drift, a budget breach, or a
+lost status enum all fail the build. CI (`.github/workflows/prompts.yml`) runs the same gate in
+repo-only mode on every push/PR that touches prompts, agents, skills, the gate, or `install.sh`.
 
 Every overwrite writes `<file>.bak-<timestamp>` next to the deployed agent **and** next to the
 repo mirror. Backups are git-ignored.
@@ -247,9 +259,127 @@ revert the matching delta in `pi-agent/prompts/` or commit the rolled-back file 
 npm --prefix bin install     # once: exact tiktoken counts (else bytes/4 estimate)
 node bin/prompt-build.mjs        # rebuild; prints per-agent tokens
 node bin/tally.mjs               # before/after table (before = baseline/tokens.json)
-node bin/signature-check.mjs     # signature + safety invariants + skill pointers
-node bin/prompt-build.mjs --check
+node bin/prompt-gate.mjs         # drift + signatures + references + budgets + schema
+node bin/prompt-gate.mjs --repo  # CI mode (no deployed tree)
+node bin/ref-check.mjs --verbose # full agent → reference → repo/manifest/deployed table
 ```
 
 Note: the earlier prototype measurement used `--stdin` (frontmatter included) and overstated the
 total by ~1.5 K; `--stdin-body` now matches file-mode accounting, so build and tally agree.
+Numbers in §2 were re-measured after fixing a silent tokenizer fallback (see §9.4); they are true
+`cl100k_base` counts, not the bytes/4 estimate the old `tsize` was falling back to.
+
+## 9. Reference-resolution gate (defect close-out)
+
+### 9.1 Root cause
+
+The signature gate validated prompt **content** but not **references**. `deep-research` emitted
+`skills/deep-research-memory/SKILL.md`, but nothing verified that the skill was materialized,
+declared, and actually deployed: the prompt was internally consistent, the pointer could point
+at nothing, and every gate still passed. The same class covers repo files, tools, the
+installer's deploy list, and reverse drift (deployed files with no source).
+
+### 9.2 Defect 1 — `deep-research-memory` (materialized, not dropped)
+
+Disposition: **materialized and verified deployed**. The content exists — it is the memory
+protocol factored out of the old deep-research prompt — at `skills/deep-research-memory/SKILL.md`.
+It is now listed in `skills/manifest.json`, deployed by the installer to `~/.pi/agent/skills/`
+(the runtime path) and `~/.kiro/skills/`, verified byte-identical in both, and the emitted agent
+points at exactly `skills/deep-research-memory/SKILL.md`.
+
+Full resolution table (repo + manifest + deployed; every row `OK/OK/OK`):
+
+| agent | reference | kind |
+|---|---|---|
+| `cve-misconfig-hunter` | `chain-patterns` | frontmatter |
+| `deep-research` | `deep-research-memory` | frontmatter + path + prose |
+| `idor-logic-hunter` | `skills/idor-patterns/SKILL.md` | path |
+| `oauth-hunter` | `skills/oauth-ato-patterns/SKILL.md` | path |
+| `race-condition-hunter` | `skills/race-patterns/SKILL.md` | path |
+| `recon` | `recon-checklist`, `critical-endpoints`, `recon-arsenal` | frontmatter + prose |
+| `security-analyzer` | `skills/chain-metrics/SKILL.md` | path |
+| `ssrf-hunter` | `skills/ssrf-surfaces/SKILL.md` | path |
+| `wordlist-curator` | `skills/wordlist-sourcing/SKILL.md` | path |
+
+Per tree the gate resolves 60 references: 38 `pihunt-*` tool references (repo `bin/`, `rag/`,
+`~/.local/bin`, `PATH`), 10 bare skill names, 7 skill paths, 5 frontmatter skill names. It also
+resolves skill→skill references (e.g. `writeup-intel` → `auth-attack-patterns`).
+
+Signature behaviours: `deep-research`'s pre-registered three (source quality, verification,
+recency) still pass; the skill-backed memory behaviours are deliberately **not** added to the
+pre-registered list — that list exists to catch *loss* of class edge, and memory mechanics are
+now covered by the reference gate (the pointer must resolve). Adding them would make the
+signature check pass on a prompt whose pointer dangles, which is the bug this closes.
+
+### 9.3 Defect 2 — pointer resolution in the gate
+
+New stage `bin/ref-check.mjs`; old gate vs new:
+
+| check | before | after |
+|---|---|---|
+| agent references `skills/<name>` | content grep only (signature check matched a literal path) | must exist in repo, be declared in `skills/manifest.json`, **and** be deployed (when a deploy tree exists) |
+| frontmatter `skills: [...]` | ignored | resolved (repo + manifest + deployed) |
+| bare skill-name mentions in prose | not checked | resolved against the deployed tree |
+| skill exists but installer does not deploy it | not checked | `install.sh` must rsync `$SRC/skills/` into **every** `deploy[]` destination (dead-on-arrival) |
+| deployed skill with no repo source | not checked | reverse-drift failure |
+| deployed skill bytes ≠ repo | not checked | stale-deploy failure |
+| repo skill not in manifest / manifest entry missing | not checked | failure |
+| `bin/`, `rag/`, `pi-agent/`, `steering/`, `prompts/`, `docs/`, `extensions/` paths | not checked | must resolve in repo |
+| `pihunt-*` tools | not checked | repo `bin/`/`rag/`, `~/.local/bin`, `~/.pi/agent/bin`, or `PATH` |
+| skill→skill references | not checked | must resolve |
+| token budgets | printed, not enforced | mechanical delta <400 (recon <2,000) enforced |
+| output-schema status enum | not checked | all four tokens required in every agent |
+| deployed vs repo agent files | `prompt-build --check` | unchanged, plus gate runs it first |
+| the gate itself | n/a | 10 negative fixtures must fail (`ref-check-selftest.mjs`) |
+
+The gate runs against **both** trees: `pi-agent/agents/*.md` (repo mirror) and
+`~/.pi/agent/agents/*.md` (deployed). Defect 1 only manifests at the deployed location, so a
+repo-only check would have missed it.
+
+Budget note: the enforced unit is the **authored delta**, which is what the refactor controls;
+the shared mechanical base (~222 tok of mandated safety + return contract) is reported as
+`assembled` for transparency. Enforcing <400 on assembled would require cutting ~50 % of every
+mechanical delta (or deleting mandated base sections), which the effectiveness rule forbids.
+Two deltas were genuinely over and were compressed without capability loss: `test-account-manager`
+459→390, `wordlist-curator` 698→393 (its static tech→list map moved to `skills/wordlist-sourcing`,
+same content, one pointer).
+
+### 9.4 Tokenizer defect found while building the gate
+
+`bin/tsize.mjs` assigned `getEncoding` to an undeclared identifier inside an ES module. Strict
+mode threw, the `catch` silently fell back to `bytes/4`, and every table/doc number was an
+estimate. Fixed (`const { getEncoding } = require("js-tiktoken")`), dependency
+(`base64-js`) installed, and **all before/after numbers re-measured from the deploy-time
+`.bak-*` originals** with real `cl100k_base`. The gate now fails loudly rather than estimating if
+the tokenizer is unavailable.
+
+### 9.5 Wiring
+
+| surface | command |
+|---|---|
+| `make dry` | `node bin/prompt-gate.mjs` then `bootstrap.sh --dry-run` |
+| `make prompts-check` | `node bin/prompt-gate.mjs` |
+| `make gate-repo` | `node bin/prompt-gate.mjs --repo` |
+| `.githooks/pre-commit` | `node bin/prompt-gate.mjs` (blocks the commit) |
+| CI `.github/workflows/prompts.yml` | `npm --prefix bin install` → `node bin/prompt-gate.mjs --repo` |
+
+`--repo` mode skips only the deployed-tree stages (a fresh CI runner has no `~/.pi`); installer
+coverage, manifest integrity, repo references, budgets, and schema still run, so a dangling
+skill reference is a build error in CI too.
+
+### 9.6 Validation (re-run unchanged after the fixes)
+
+| suite | result |
+|---|---|
+| `make prompts-check` (gate, full) | **PASS 4/4** — drift, signatures, references/budgets/schema, self-test |
+| `make gate-repo` (CI mode, fake empty `$HOME`) | **PASS 4/4** — proves the gate works without a deploy tree |
+| `bin/ref-check-selftest.mjs` | **PASS 11/11** — clean fixture + 10 injected defect classes |
+| `bin/prompt-smoke.py` | **PASS 8/8 agents** on default provider + ≥1 alternate (38 calls, 28 ok). 9 failures were provider-side (freellm `deepseek-v4-flash` HTTP 429/502 on every agent; one `gemini-3.1-flash-lite` timeout on `wordlist-curator` that passed on retry, and again on the final prompt). One alternate-provider content miss: `recon` on `allam-2-7b`; `recon` passes on default + 3 alternates. |
+| `bin/hunter-signal-check.sh` | **PASS 6/6** — sqli/oauth/llm reproduce the known vuln with evidence + negative control; clean controls return explicit NO-FINDING |
+| `bin/elite-regression.sh` | **PASS 3/3** — dup rejected with cited duplicate, known rejected as no-new-evidence, novel graded non-reject |
+| `bin/tally.mjs` | before/after table regenerated with real cl100k (§2) |
+
+No hunter delta was weakened by this close-out. The only prompt edits were the two mechanical
+deltas over their authored budget (`test-account-manager`, `wordlist-curator`), and the two
+mechanical scope loaders trimmed by a few tokens to clear <400; every capability and every
+safety invariant is intact (gate enforces both).

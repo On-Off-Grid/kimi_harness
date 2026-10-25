@@ -13,7 +13,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 let enc;
 try {
-  ({ getEncoding } = require("js-tiktoken"));
+  const { getEncoding } = require("js-tiktoken");
   enc = getEncoding("cl100k_base");
 } catch {
   // dependency missing -> byte/4 estimate (never fail CI for a stat)

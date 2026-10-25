@@ -1,0 +1,47 @@
+name: prompt-gate
+
+on:
+  push:
+    paths:
+      - "pi-agent/prompts/**"
+      - "pi-agent/agents/**"
+      - "skills/**"
+      - "bin/prompt-*.mjs"
+      - "bin/signature-check.mjs"
+      - "bin/ref-check*.mjs"
+      - "bin/tsize.mjs"
+      - "install.sh"
+      - "Makefile"
+      - ".githooks/**"
+      - ".github/workflows/prompts.yml"
+  pull_request:
+    paths:
+      - "pi-agent/prompts/**"
+      - "pi-agent/agents/**"
+      - "skills/**"
+      - "bin/prompt-*.mjs"
+      - "bin/signature-check.mjs"
+      - "bin/ref-check*.mjs"
+      - "bin/tsize.mjs"
+      - "install.sh"
+      - "Makefile"
+      - ".githooks/**"
+      - ".github/workflows/prompts.yml"
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # exact cl100k counts (otherwise tsize falls back to a bytes/4 estimate)
+      - run: npm --prefix bin install --no-audit --no-fund
+
+      # repo-only mode: no ~/.pi deploy tree exists on a fresh runner.
+      # Still enforces build drift, signature behaviours, skill/file/tool reference
+      # resolution, installer coverage (dead-on-arrival), budgets, and schema.
+      - run: node bin/prompt-gate.mjs --repo

@@ -103,8 +103,8 @@ warn "gmail MCP: put your OAuth files at $H/.gmail-mcp/{gcp-oauth.keys.json,cred
 c "5/9  steering + skills + coordinator prompt"
 run "mkdir -p '$H/.kiro/steering' '$H/.kiro/skills' '$H/.pi/agent/skills' '$H/.config/opencode/prompts/claude-agents'"
 run "cp -p '$SRC'/steering/*.md '$H/.kiro/steering/'" && ok "steering"
-run "rsync -a '$SRC/skills/' '$H/.kiro/skills/'" && ok "skills (×16)"
-run "rsync -a '$SRC/skills/' '$H/.pi/agent/skills/'" && ok "skills (×16) -> ~/.pi/agent/skills (pi runtime)"
+run "rsync -a '$SRC/skills/' '$H/.kiro/skills/'" && ok "skills (×17)"
+run "rsync -a '$SRC/skills/' '$H/.pi/agent/skills/'" && ok "skills (×17) -> ~/.pi/agent/skills (pi runtime)"
 run "cp -p '$SRC/prompts/build.md' '$H/.config/opencode/prompts/claude-agents/build.md'" && ok "coordinator brain (build.md)"
 
 c "5b/9  RAG + knowledge-graph (semantic recall over techniques, memory graph, findings)"

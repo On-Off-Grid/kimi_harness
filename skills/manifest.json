@@ -1,0 +1,99 @@
+{
+  "runtime_dir": "~/.pi/agent/skills",
+  "deploy": [
+    "~/.pi/agent/skills",
+    "~/.kiro/skills"
+  ],
+  "skills": {
+    "auth-attack-patterns": {
+      "path": "skills/auth-attack-patterns/SKILL.md",
+      "consumers": []
+    },
+    "business-impact": {
+      "path": "skills/business-impact/SKILL.md",
+      "consumers": []
+    },
+    "chain-metrics": {
+      "path": "skills/chain-metrics/SKILL.md",
+      "consumers": [
+        "security-analyzer"
+      ]
+    },
+    "chain-patterns": {
+      "path": "skills/chain-patterns/SKILL.md",
+      "consumers": [
+        "cve-misconfig-hunter"
+      ]
+    },
+    "critical-endpoints": {
+      "path": "skills/critical-endpoints/SKILL.md",
+      "consumers": [
+        "recon"
+      ]
+    },
+    "deep-research-memory": {
+      "path": "skills/deep-research-memory/SKILL.md",
+      "consumers": [
+        "deep-research"
+      ]
+    },
+    "framework-exploits": {
+      "path": "skills/framework-exploits/SKILL.md",
+      "consumers": []
+    },
+    "idor-patterns": {
+      "path": "skills/idor-patterns/SKILL.md",
+      "consumers": [
+        "idor-logic-hunter"
+      ]
+    },
+    "oauth-ato-patterns": {
+      "path": "skills/oauth-ato-patterns/SKILL.md",
+      "consumers": [
+        "oauth-hunter"
+      ]
+    },
+    "race-patterns": {
+      "path": "skills/race-patterns/SKILL.md",
+      "consumers": [
+        "race-condition-hunter"
+      ]
+    },
+    "recon-arsenal": {
+      "path": "skills/recon-arsenal/SKILL.md",
+      "consumers": [
+        "recon"
+      ]
+    },
+    "recon-checklist": {
+      "path": "skills/recon-checklist/SKILL.md",
+      "consumers": [
+        "recon"
+      ]
+    },
+    "security-bounty-hunter": {
+      "path": "skills/security-bounty-hunter/SKILL.md",
+      "consumers": []
+    },
+    "source-review": {
+      "path": "skills/source-review/SKILL.md",
+      "consumers": []
+    },
+    "ssrf-surfaces": {
+      "path": "skills/ssrf-surfaces/SKILL.md",
+      "consumers": [
+        "ssrf-hunter"
+      ]
+    },
+    "wordlist-sourcing": {
+      "path": "skills/wordlist-sourcing/SKILL.md",
+      "consumers": [
+        "wordlist-curator"
+      ]
+    },
+    "writeup-intel": {
+      "path": "skills/writeup-intel/SKILL.md",
+      "consumers": []
+    }
+  }
+}
