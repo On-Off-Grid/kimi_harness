@@ -306,10 +306,11 @@ Per tree the gate resolves 60 references: 38 `pihunt-*` tool references (repo `b
 resolves skill→skill references (e.g. `writeup-intel` → `auth-attack-patterns`).
 
 Signature behaviours: `deep-research`'s pre-registered three (source quality, verification,
-recency) still pass; the skill-backed memory behaviours are deliberately **not** added to the
-pre-registered list — that list exists to catch *loss* of class edge, and memory mechanics are
-now covered by the reference gate (the pointer must resolve). Adding them would make the
-signature check pass on a prompt whose pointer dangles, which is the bug this closes.
+recency) still pass. The skill-backed memory behaviours are deliberately **not** added to the
+pre-registered list: those terms now live in the skill, not the agent body, so a content grep on
+the agent cannot verify them — the correct coverage is the reference gate (pointer resolves, and
+the deployed skill is byte-identical), not a signature regex. Adding them would force the memory
+protocol back inline and undo the offload.
 
 ### 9.3 Defect 2 — pointer resolution in the gate
 
