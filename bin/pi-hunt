@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# pi-hunt — run pi.dev as the bug-bounty coordinator via direct OpenRouter.
+# pi-hunt — run pi.dev as the bug-bounty coordinator.
 # Loads the coordinator brain (build.md) + workflow rules (bugbounty-autoflow.md) +
-# a pi execution adapter, on claude-opus-4.8 at max reasoning effort, with all 22
-# specialist subagents and local MCP tools available.
+# a pi execution adapter, on Kimi K3 (kimi-coding/k3) at max thinking effort, with
+# all 26 specialist subagents and the MCP tools available. Conservative tiering:
+# flagship = k3, elite pair (strict-triager/hypothesis-redteam) = k3.1-pro,
+# mechanical tier = google-direct/gemini-3.1-flash-lite (manage with pi-tier / pi-4.8).
+# NOTE: launch Burp Suite (AI-Agent extension listening on 127.0.0.1:9876) before
+# running if you want Burp MCP tools in the session.
 #
 # Usage:
 #   pi-hunt                                   # interactive; then type: Hunt <program> for CRITICAL
@@ -10,30 +14,47 @@
 #   pi-hunt -p "Hunt <program> for CRITICAL"  # one-shot (headless)
 set -uo pipefail
 
-# Auto-continue watchdog: ENABLED. Retained as a bounded, provider-neutral recovery
-# for no-tool end turns during a hunt. It originated as a Kiro server-side web-search
-# workaround; the Kiro-specific root cause is documented in docs/operator/01-health-analysis.md.
-# It is TUI-only, never runs in subagents/headless, respects [[HUNT_COMPLETE]] and
-# [[HUNT_BLOCKED]], and is capped by PI_AUTOCONTINUE_MAX_EMPTY and PI_AUTOCONTINUE_MAX.
+# Auto-continue watchdog: ENABLED. Root-caused stall: a turn whose only action is
+# a gateway-resolved web_search (Path B) reports stop_reason=end_turn with no
+# client tool_blocks, so pi treats it as the model's FINAL answer and idles even
+# though the model intended to act on the search results (the 2026-06-16 yahoo
+# "Scout AI" stop). web_search is resolved server-side and is NOT in pi's tool
+# registry, so the gateway cannot emit stop_reason=tool_use without hanging pi.
+# The watchdog is the correct mechanism: on a no-tool end_turn during a hunt it
+# auto-sends one "continue" so the coordinator proceeds. It is TUI-only, never runs
+# in subagents/headless, respects [[HUNT_COMPLETE]]/[[HUNT_BLOCKED]], and is capped
+# (PI_AUTOCONTINUE_MAX_EMPTY=3 consecutive no-progress turns, PI_AUTOCONTINUE_MAX=400
+# lifetime). Toggle off live with /autocontinue off, or set this back to 0.
 export PI_AUTOCONTINUE=1
 
-# Empty-trigger compaction: ENABLED. Retained as conservative large-context recovery;
-# its Kiro gateway-specific entropy-elision history remains documented separately.
-# The extension will summarize with Kimi-Coding and resume the coordinator
-# after compaction. Set COMPACT_ON_46_ON_EMPTY=0 to disable.
-export COMPACT_ON_46_ON_EMPTY=1
+# compact-on-46 empty-trigger: ENABLED. There are TWO distinct large-context empty triggers
+# (both proven by deterministic gateway replay 2026-06-18):
+#   (A) Concentrated high-entropy BLOBS in tool results - base64 screenshots/images and
+#       long opaque tokens/JWTs/signed-URL/error blobs. FIXED at the gateway by eliding
+#       (ELIDE_STALE_TOOL_IMAGES + ELIDE_HIGH_ENTROPY_TOKENS with a tokenizer-fragmentation
+#       discriminator). This is the farfetch case and the gateway handles it model-wide.
+#   (B) Sheer token VOLUME (~150k+) with no concentrated blob to remove - proven on
+#       cambium: eliding all opaque tokens / killing all entropy (volume held constant)
+#       still empties, and padding a small OK request with ~105k of pure BENIGN prose
+#       reproduces the empty. The gateway CANNOT fix this (nothing to elide); only
+#       COMPACTION reduces the volume. Empirically empties are probabilistic and rise
+#       with volume (gw.log: empty median ~64k vs OK median ~232k, overlapping).
+# compact-on-46's empty-trigger compacts via k3-256k (which is stable at large context) when an
+# empty stall hits at a large context, which is the correct and only fix for (B).
+# Set COMPACT_ON_46_ON_EMPTY=0 to disable.
 export COMPACT_ON_46_PROVIDER="kimi-coding"
 export COMPACT_ON_46_MODEL="k3-256k"
+export COMPACT_ON_46_ON_EMPTY=1
 
 BUILD="__PIHUNT_HOME__/.config/opencode/prompts/claude-agents/build.md"
-FLOW="__PIHUNT_HOME__/.kiro/steering/bugbounty-autoflow.md"
+FLOW="__PIHUNT_HOME__/.pi/agent/steering/bugbounty-autoflow.md"
 ADAPT="__PIHUNT_HOME__/.pi/agent/pi-coordinator-adapter.md"
 
 for f in "$BUILD" "$FLOW" "$ADAPT"; do
   [ -r "$f" ] || { echo "pi-hunt: missing coordinator prompt: $f" >&2; exit 1; }
 done
 
-# Direct Anthropic Messages requests through OpenRouter; pi-kiro remains legacy-only.
+# Kimi Code (kimi-coding/k3) via pi; pi-kiro remains legacy-only.
 exec pi --model kimi-coding/k3:xhigh \
   --append-system-prompt "$BUILD" \
   --append-system-prompt "$FLOW" \

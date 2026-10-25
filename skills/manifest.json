@@ -1,8 +1,7 @@
 {
   "runtime_dir": "~/.pi/agent/skills",
   "deploy": [
-    "~/.pi/agent/skills",
-    "~/.kiro/skills"
+    "~/.pi/agent/skills"
   ],
   "skills": {
     "auth-attack-patterns": {

@@ -74,6 +74,33 @@
         }
       ]
     },
+    "google-direct": {
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "api": "openai-completions",
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {
+          "id": "gemini-3.1-flash-lite",
+          "name": "Gemini 3.1 Flash Lite (Google, free tier)",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "contextWindow": 1048576,
+          "maxTokens": 8192,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    },
     "ollama": {
       "baseUrl": "http://localhost:11434/v1",
       "api": "openai-completions",

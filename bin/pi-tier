@@ -2,33 +2,36 @@
 # pi-tier — cost/perf model tiering for the pi-hunt subagents.
 #
 # Heavy-reasoning agents (exploit creativity, chaining, validation) stay on the
-# flagship model; mechanical agents (scope loading, recon mapping, account
-# setup, UI observation, payload lookup) run on a cheaper "fast" model that does
-# the job for less. This cuts cost/latency on the high-volume mechanical work
+# flagship Kimi model; mechanical agents (scope loading, recon mapping, account
+# setup, UI observation, payload lookup) run on a cheaper "fast" model — any
+# provider registered in models.json (e.g. google-direct/gemini-3.1-flash-lite,
+# mistral-direct/codestral-latest, groq-direct/qwen/qwen3.8-27b) — that does the
+# job for less. This cuts cost/latency on the high-volume mechanical work
 # without dulling the agents that actually find and prove bugs.
 #
 #   pi-tier on        apply tiering (mechanical agents -> fast model, elite pair -> k3.1-pro)
 #   pi-tier off       mechanical agents back to the flagship model (elite pair untouched)
 #   pi-tier status    show current per-agent models
-#   pi-tier set-fast <model-id>     change the fast model (default k3-256k)
+#   pi-tier set-fast <provider/model>   change the fast model ref (default google-direct/gemini-3.1-flash-lite)
 #
-# Flagship is the most common model among the agents. Fast model must exist in
-# ~/.pi/agent/models.json. Effect applies to NEW subagent spawns. The elite pair
-# (strict-triager, hypothesis-redteam) is always pinned to k3.1-pro.
+# Flagship is the most common kimi-coding model among the agents. Fast model ref
+# must exist in ~/.pi/agent/models.json. Effect applies to NEW subagent spawns.
+# The elite pair (strict-triager, hypothesis-redteam) is always pinned to
+# kimi-coding/k3.1-pro and is protected from any flattening.
 set -uo pipefail
 
 AGENTS="$HOME/.pi/agent/agents"
 MODELS_JSON="$HOME/.pi/agent/models.json"
 STATE="$HOME/.pi/agent/.tier-state"
-FAST_DEFAULT="k3-256k"
-PROVIDER="kimi-coding"
+FAST_DEFAULT="google-direct/gemini-3.1-flash-lite"
+KIMI="kimi-coding"
 
 # Elite pair: highest-value validation/redteam agents, pinned to k3.1-pro.
 ELITE_AGENTS=(
   strict-triager
   hypothesis-redteam
 )
-ELITE_DEFAULT="k3.1-pro"
+ELITE_DEFAULT="kimi-coding/k3.1-pro"
 
 # Mechanical agents that run on the fast model when tiering is ON.
 FAST_AGENTS=(
@@ -43,49 +46,61 @@ FAST_AGENTS=(
 )
 
 ok(){ printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
-err(){ printf '  \033[1;31m✗ %s\033[0m\n' "$*"; }
+err(){ printf '  \033[1;31m✗ %s\n' "$*"; }
 
-fast_model(){
-  local model
-  model=$([ -f "$STATE" ] && grep -m1 . "$STATE" 2>/dev/null || true)
-  case "$model" in
+fast_ref(){
+  local ref
+  ref=$([ -f "$STATE" ] && grep -m1 . "$STATE" 2>/dev/null || true)
+  # normalize legacy bare ids (pre multi-provider)
+  case "$ref" in
     ""|claude-sonnet-4.6|anthropic/claude-sonnet-4.6) echo "$FAST_DEFAULT";;
-    *) echo "$model";;
+    k3-256k|k3|k3.1-pro|k3.1-pro-highspeed) echo "$KIMI/$ref";;
+    */*) echo "$ref";;
+    *) echo "$KIMI/$ref";;
   esac
 }
 
 flagship(){
-  # the model the bulk of agents currently use (mode), excluding the fast ones
-  grep -hoE 'model:\s*kimi-coding/[a-z0-9.-]+' "$AGENTS"/*.md 2>/dev/null \
-    | sed 's|model:\s*kimi-coding/||' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}'
+  # the model the bulk of agents currently use (mode), among kimi-coding refs
+  grep -hoE 'model:\s*kimi-coding/[a-zA-Z0-9.-]+' "$AGENTS"/*.md 2>/dev/null \
+    | sed 's|model:\s*||' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}'
 }
 
-have_model(){ grep -q "\"id\":\s*\"$1\"" "$MODELS_JSON" 2>/dev/null; }
+have_model(){
+  # $1 = provider/model ref
+  grep -q "\"id\":\s*\"${1#*/}\"" "$MODELS_JSON" 2>/dev/null
+}
 
-set_model(){ # $1=agent file, $2=model-id
-  sed -i -E "s|^model:\s*kimi-coding/.*$|model: $PROVIDER/$2|" "$1"
+set_model(){ # $1=agent file, $2=full provider/model ref
+  sed -i -E "s|^model:\s*.*$|model: $2|" "$1"
 }
 
 is_fast_agent(){ local a="$1"; for x in "${FAST_AGENTS[@]}"; do [ "$x" = "$a" ] && return 0; done; return 1; }
 is_elite_agent(){ local a="$1"; for x in "${ELITE_AGENTS[@]}"; do [ "$x" = "$a" ] && return 0; done; return 1; }
 
+agent_ref(){ # $1=agent file -> first provider/model ref found
+  grep -m1 -oE 'model:\s*[a-zA-Z0-9-]+/[a-zA-Z0-9./-]+' "$1" 2>/dev/null | sed -E 's|^model:\s*||'
+}
+
 status(){
   local n=0 nf=0 ne=0
-  printf '  %-26s %s\n' "AGENT" "MODEL"
+  printf '  %-26s %-34s %s\n' "AGENT" "MODEL" "CLASS"
   for f in "$AGENTS"/*.md; do
-    local a m; a=$(basename "$f" .md); m=$(grep -m1 -oE 'kimi-coding/[a-z0-9.-]+' "$f" | sed 's|kimi-coding/||')
-    if is_fast_agent "$a"; then printf '  %-26s %s  (mechanical)\n' "$a" "$m"; nf=$((nf+1))
-    elif is_elite_agent "$a"; then printf '  %-26s %s  (elite)\n' "$a" "$m"; ne=$((ne+1))
-    else printf '  %-26s %s\n' "$a" "$m"; fi
+    local a m; a=$(basename "$f" .md); m=$(agent_ref "$f")
+    if is_fast_agent "$a"; then printf '  %-26s %-34s (mechanical)\n' "$a" "$m"; nf=$((nf+1))
+    elif is_elite_agent "$a"; then printf '  %-26s %-34s (elite)\n' "$a" "$m"; ne=$((ne+1))
+    else printf '  %-26s %-34s\n' "$a" "$m"; fi
     n=$((n+1))
   done
-  echo "  fast model = $(fast_model) | flagship = $(flagship) | $n agents ($nf mechanical, $ne elite)"
+  echo "  fast ref = $(fast_ref) | flagship = $(flagship) | $n agents ($nf mechanical, $ne elite)"
 }
 
 case "${1:-status}" in
   on)
-    FM="$(fast_model)"; FL="$(flagship)"
-    have_model "$FM" || { err "fast model '$FM' not in models.json"; exit 1; }
+    FM="$(fast_ref)"; FL="$(flagship)"
+    case "$FM" in */*) ;; *) err "fast ref must be provider/model (got '$FM')"; exit 1;; esac
+    have_model "$FM" || { err "fast model '${FM#*/}' not in models.json"; exit 1; }
+    [ -n "$FL" ] || { err "no kimi-coding flagship found among agents"; exit 1; }
     for f in "$AGENTS"/*.md; do
       a=$(basename "$f" .md)
       if is_fast_agent "$a"; then set_model "$f" "$FM"
@@ -97,6 +112,7 @@ case "${1:-status}" in
     ;;
   off)
     FL="$(flagship)"
+    [ -n "$FL" ] || { err "no kimi-coding flagship found among agents"; exit 1; }
     for f in "$AGENTS"/*.md; do
       a=$(basename "$f" .md)
       if is_elite_agent "$a"; then set_model "$f" "$ELITE_DEFAULT"
@@ -106,11 +122,12 @@ case "${1:-status}" in
     status
     ;;
   set-fast)
-    [ -n "${2:-}" ] || { err "usage: pi-tier set-fast <model-id>"; exit 1; }
-    have_model "$2" || { err "model '$2' not in models.json"; exit 1; }
-    echo "$2" > "$STATE"; ok "fast model = $2 (run 'pi-tier on' to apply)"
+    [ -n "${2:-}" ] || { err "usage: pi-tier set-fast <provider/model>"; exit 1; }
+    case "$2" in */*) ref="$2";; *) ref="$KIMI/$2";; esac
+    have_model "$ref" || { err "model '${ref#*/}' not in models.json"; exit 1; }
+    echo "$ref" > "$STATE"; ok "fast ref = $ref (run 'pi-tier on' to apply)"
     ;;
   status|"") status;;
-  -h|--help|help) sed -n '2,18p' "$0" | sed 's/^#\s\?//';;
-  *) err "usage: pi-tier {on|off|status|set-fast <model>}"; exit 1;;
+  -h|--help|help) sed -n '2,20p' "$0" | sed 's/^#\s\?//';;
+  *) err "usage: pi-tier {on|off|status|set-fast <provider/model>}";;
 esac

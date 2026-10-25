@@ -49,10 +49,12 @@ function makeFixture() {
   const wh = (rel, txt) => { const p = path.join(home, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, txt); };
 
   w("bin/tool.mjs", "// fixture tool\n");
-  w("install.sh", `#!/usr/bin/env bash\nrsync -a '$SRC/skills/' '$H/.pi/agent/skills/'\nrsync -a '$SRC/skills/' '$H/.kiro/skills/'\n`);
+  // The fixture keeps a second destination so the generic per-destination
+  // coverage loop stays exercised; the real manifest now has only ~/.pi/agent/skills.
+  w("install.sh", `#!/usr/bin/env bash\nrsync -a '$SRC/skills/' '$H/.pi/agent/skills/'\nrsync -a '$SRC/skills/' '$H/.local/share/pihunt/skills/'\n`);
   w("skills/manifest.json", JSON.stringify({
     runtime_dir: "~/.pi/agent/skills",
-    deploy: ["~/.pi/agent/skills", "~/.kiro/skills"],
+    deploy: ["~/.pi/agent/skills", "~/.local/share/pihunt/skills"],
     skills: { "alpha-skill": { path: "skills/alpha-skill/SKILL.md", consumers: ["fixture-hunter"] } },
   }, null, 2));
   w("skills/alpha-skill/SKILL.md", "---\nname: alpha-skill\ndescription: \"fixture\"\n---\n\nalpha\n");
@@ -108,8 +110,15 @@ check("deployed skill with no repo source", (fx) => {
 }, /ghost-skill.*no repo source/i);
 
 check("half-populated deploy destination", (fx) => {
-  fs.mkdirSync(path.join(fx.home, ".kiro/skills"), { recursive: true });
-}, /repo skill "alpha-skill" is missing from ~\/\.kiro\/skills/i);
+  fs.mkdirSync(path.join(fx.home, ".local/share/pihunt/skills"), { recursive: true });
+}, /repo skill "alpha-skill" is missing from ~\/\.local\/share\/pihunt\/skills/i);
+
+check("legacy .kiro deploy destination", (fx) => {
+  const p = path.join(fx.repo, "skills/manifest.json");
+  const m = JSON.parse(fs.readFileSync(p, "utf8"));
+  m.deploy.push("~/.kiro/skills");
+  fs.writeFileSync(p, JSON.stringify(m, null, 2));
+}, /legacy ~\/\.kiro deploy destination/i);
 
 check("stale deployed skill bytes", (fx) => {
   fs.appendFileSync(path.join(fx.home, ".pi/agent/skills/alpha-skill/SKILL.md"), "\nstale edit\n");

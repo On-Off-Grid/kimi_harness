@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pi-4.8 — flagship quality toggle for the pi-hunt stack (Kimi era).
+# pi-4.8 — flagship quality toggle for the pi-hunt stack (Kimi/Google era).
 #
 #   pi-4.8 on      flagship agents + coordinator -> Kimi K3.1 Pro (premium quality)
 #   pi-4.8 off     flagship agents + coordinator -> Kimi K3            (conservative default)
@@ -8,7 +8,7 @@
 # Fixed tiers this toggle NEVER touches:
 #   - elite pair (strict-triager, hypothesis-redteam): always kimi-coding/k3.1-pro
 #     (restored automatically if found off it)
-#   - 8 mechanical agents: managed by pi-tier (kimi-coding/k3-256k when tiering ON)
+#   - 8 mechanical agents: managed by pi-tier (provider-aware; currently google-direct/gemini-3.1-flash-lite)
 #
 # Effect applies to the NEXT `pi-hunt` launch and any new subagent spawns; a
 # running session keeps its model until you relaunch or /model-switch it.

@@ -34,7 +34,7 @@ text ──► embedder.py ──► 256-d vector ──► store.py (SQLite BLO
 - **Ingest**: `pihunt_rag/ingest.py`. Idempotent per source (stable chunk ids).
 - **CLI**: `pihunt_rag/cli.py` → `pihunt-rag` wrapper on PATH.
 - **MCP server**: `mcp-servers/pihunt-rag-mcp/server.mjs` (zero-dep Node stdio JSON-RPC),
-  deployed to `~/opencode/pihunt-rag-mcp/server.mjs`, wired into `~/.kiro/settings/mcp.json`.
+  deployed to `~/opencode/pihunt-rag-mcp/server.mjs`, wired into `~/.pi/agent/mcp.json`.
 
 ## Install
 

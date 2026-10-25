@@ -55,8 +55,8 @@ run "mkdir -p '$MCP_DST'"
 run "cp -p '$SRC/../mcp-servers/pihunt-rag-mcp/server.mjs' '$MCP_DST/server.mjs'"
 ok "server.mjs deployed"
 
-c "4/5  wire MCP server into ~/.kiro/settings/mcp.json"
-MCPJSON="$H/.kiro/settings/mcp.json"
+c "4/5  wire MCP server into ~/.pi/agent/mcp.json"
+MCPJSON="$H/.pi/agent/mcp.json"
 if [ "$DRY" = 0 ] && [ -f "$MCPJSON" ]; then
   PIHUNT_RAG_REPO="$SRC" RAG_HOME="$RAG_HOME" MCP_DST="$MCP_DST" "$PY" - "$MCPJSON" <<'PY' && ok "mcp.json updated" || warn "could not patch mcp.json (add the pihunt-rag block manually)"
 import json, os, sys

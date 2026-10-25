@@ -77,7 +77,7 @@ log "program=$PROG mode=$MODE domains=$(echo "$DOMAINS"|tr '\n' ' ')"
 
 # Reuse a GitHub token (env, or scrape the MCP config) for github-subdomains.
 GH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_MCP_TOKEN:-}}}"
-[ -z "$GH_TOKEN" ] && GH_TOKEN="$(grep -oE 'github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]+' "$HOME/.kiro/settings/mcp.json" 2>/dev/null | head -1)"
+[ -z "$GH_TOKEN" ] && GH_TOKEN="$(grep -hoE 'github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]+' "$HOME/.pi/agent/mcp.json" "$HOME/.kiro/settings/mcp.json" 2>/dev/null | head -1)"
 ORG_NAME="${RECON_ORG_NAME:-$PROG}"   # human org name for ASN search (override if handle != company)
 
 # ========== STAGE 0: WIDE-SCOPE INFRA (Haddix) — ASN / IP-space / cloud certs ==========

@@ -1,14 +1,14 @@
 /**
  * MCP Bridge for pi
  * -----------------
- * pi ships no built-in MCP. This extension connects to the SAME MCP servers
- * kiro-cli uses (reads kiro's mcp.json by default) and exposes each MCP tool
- * to pi as a native tool named `<server>_<tool>`.
+ * pi ships no built-in MCP. This extension connects to the MCP servers declared
+ * in the config below and exposes each MCP tool to pi as a native tool named
+ * `<server>_<tool>`.
  *
  * Config source (first that exists):
  *   1. $PI_MCP_CONFIG
  *   2. ~/.pi/agent/mcp.json
- *   3. ~/.kiro/settings/mcp.json   (mirror kiro-cli exactly)
+ *   3. ~/.kiro/settings/mcp.json   (legacy fallback)
  *
  * Per-server fields (kiro/Claude-style): command,args,env[,cwd]  OR  url,headers ;
  * plus optional `disabled` and `timeout` (ms).

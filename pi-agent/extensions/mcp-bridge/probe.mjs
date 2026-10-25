@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import * as path from "node:path";
 
 function collectTree(root) {
   const ppid = new Map();
@@ -24,13 +25,20 @@ async function killTree(root) {
 }
 function withTimeout(p, ms, l) { return Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error(l + " timeout " + ms + "ms")), ms))]); }
 
-const cfg = JSON.parse(fs.readFileSync(os.homedir() + "/.kiro/settings/mcp.json", "utf8"));
+const candidates = [
+  process.env.PI_MCP_CONFIG,
+  path.join(os.homedir(), ".pi", "agent", "mcp.json"),
+  path.join(os.homedir(), ".kiro", "settings", "mcp.json"),
+].filter(Boolean);
+const cfgPath = candidates.find((p) => fs.existsSync(p));
+if (!cfgPath) { console.error("no mcp.json found"); process.exit(1); }
+const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
 const servers = cfg.mcpServers || {};
 const SKIP = new Set(["browser-live"]); // heavy (launches/【shares Chrome); validated separately
 const TIMEOUT = 15000;
 
 for (const [name, sc] of Object.entries(servers)) {
-  if (sc?.disabled) { console.log(`${name}: (disabled in kiro config, skipped)`); continue; }
+  if (sc?.disabled) { console.log(`${name}: (disabled in MCP config, skipped)`); continue; }
   if (SKIP.has(name)) { console.log(`${name}: (skipped here to avoid disturbing shared Chrome)`); continue; }
   const client = new Client({ name: "probe", version: "1" }, { capabilities: {} });
   let transport, child = null;

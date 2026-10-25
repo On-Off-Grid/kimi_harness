@@ -18,6 +18,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SKILLS = path.join(REPO, "skills");
 const AGENTS = path.join(REPO, "pi-agent", "agents");
 const MANIFEST = path.join(SKILLS, "manifest.json");
+const RUNTIME_DIR = "~/.pi/agent/skills";
 
 const names = fs.readdirSync(SKILLS)
   .filter((d) => fs.existsSync(path.join(SKILLS, d, "SKILL.md")))
@@ -34,8 +35,8 @@ for (const s of names) {
 }
 
 const manifest = {
-  runtime_dir: "~/.pi/agent/skills",
-  deploy: ["~/.pi/agent/skills", "~/.kiro/skills"],
+  runtime_dir: RUNTIME_DIR,
+  deploy: [RUNTIME_DIR],
   skills,
 };
 

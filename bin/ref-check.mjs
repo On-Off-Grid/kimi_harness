@@ -17,7 +17,9 @@
  *      installed;
  *   5. a skill→skill reference dangles;
  *   6. a mechanical agent exceeds its token budget (recon < 2,000, all others < 400);
- *   7. an agent lost the return-contract status enum (static output-schema check).
+ *   7. an agent lost the return-contract status enum (static output-schema check);
+ *   8. the manifest declares a retired ~/.kiro deploy destination, or install.sh
+ *      rsyncs skills to a destination that is not declared in deploy[].
  *
  * Runs against BOTH the repo mirror (pi-agent/agents) and the deployed tree
  * (~/.pi/agent/agents) when the latter exists — defect 1 only manifested at deploy time.
@@ -79,6 +81,9 @@ const runtimeDest = manifest.runtime_dir;
 
 if (!runtimeDest) fail("manifest", "runtime_dir is not set");
 else if (!deployDests.includes(runtimeDest)) fail("manifest", `runtime_dir ${runtimeDest} is not in deploy[]`);
+for (const dest of deployDests) {
+  if (dest.includes("/.kiro/")) fail("manifest", `legacy ~/.kiro deploy destination "${dest}" is retired`);
+}
 
 const repoSkillDirs = exists(REPO_SKILLS)
   ? fs.readdirSync(REPO_SKILLS).filter((d) => exists(path.join(REPO_SKILLS, d, "SKILL.md"))).sort()
@@ -107,6 +112,10 @@ for (const dest of deployDests) {
   const rel = dest.replace(/^~\//, "");
   const re = new RegExp(`rsync\\s+-a\\s+['"]\\$SRC/skills/['"]\\s+['"]\\$H/${escapeRe(rel)}/['"]`);
   if (!re.test(installTxt)) fail("installer", `no rsync of $SRC/skills/ -> $H/${rel}/ in install.sh (skill would be dead on arrival)`);
+}
+const skillRsyncs = [...installTxt.matchAll(/rsync\s+-a\s+['"]\$SRC\/skills\/['"]\s+['"]\$H\/([^'"]+)\/['"]/g)].map((m) => m[1]);
+for (const rel of skillRsyncs) {
+  if (!deployDests.includes("~/" + rel)) fail("installer", `install.sh deploys skills to ~/${rel} but it is not in manifest deploy[] (dead deploy surface)`);
 }
 
 /* ------------------------------------------------ skill → skill references */

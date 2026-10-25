@@ -2,9 +2,9 @@
 # =============================================================================
 # pi-hunt restore/install
 # Restores the pi-hunt bug-bounty setup for the current machine:
-#   pi.dev coordinator + 23 specialist subagents (incl. hypothesis-redteam)
-#   direct OpenRouter runtime configuration
-#   ALL 6 MCP servers (browser-live, burp, memory, github, medium, gmail)
+#   pi.dev coordinator + 26 specialist subagents (incl. hypothesis-redteam)
+#   Kimi Code coordinator + Google-direct mechanical tier
+#   ALL 7 MCP servers (browser-live, burp, memory, github, medium, pihunt-rag, gmail)
 #   steering, skills, coordinator prompt, systemd auto-start
 #
 # Usage:   ./install.sh                 # full install
@@ -22,6 +22,8 @@ USER_NAME="$(id -un)"
 TS="$(date +%Y%m%d-%H%M%S)"
 PI_PKG="@earendil-works/pi-coding-agent@0.79.0"
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
+DRYARG=""; [ "$DRY" = 1 ] && DRYARG="--dry-run"
+DRYNOTE=""; [ "$DRY" = 1 ] && DRYNOTE=" (dry-run — nothing changed)"
 
 c(){ printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 ok(){ printf '   \033[1;32m✓\033[0m %s\n' "$*"; }
@@ -63,17 +65,20 @@ if command -v pi >/dev/null 2>&1; then
   done
 else warn "pi not on PATH yet — packages will auto-install on first 'pi' run from the bundled settings.json"; fi
 
-c "3/9  MCP config  ->  $H/.kiro/settings/mcp.json  (+ github token)"
-run "mkdir -p '$H/.kiro/settings'"
-PRIOR_TOK="$(grep -o 'ghp_[A-Za-z0-9]*' "$H/.kiro/settings/mcp.json" 2>/dev/null | head -1)"   # preserve on re-install
-bk "$H/.kiro/settings/mcp.json"
-run "cp -p '$SRC/kiro-settings/mcp.json' '$H/.kiro/settings/mcp.json'"
-rehome "$H/.kiro/settings/mcp.json"
+c "3/9  MCP config  ->  $H/.pi/agent/mcp.json  (+ github token)"
+run "mkdir -p '$H/.pi/agent'"
+PRIOR_TOK="$(grep -o 'ghp_[A-Za-z0-9]*' "$H/.pi/agent/mcp.json" 2>/dev/null | head -1)"   # preserve on re-install
+if [ -z "$PRIOR_TOK" ]; then
+  PRIOR_TOK="$(grep -o 'ghp_[A-Za-z0-9]*' "$H/.kiro/settings/mcp.json" 2>/dev/null | head -1)"  # migrate legacy token
+fi
+bk "$H/.pi/agent/mcp.json"
+run "cp -p '$SRC/mcp-config/mcp.json' '$H/.pi/agent/mcp.json'"
+rehome "$H/.pi/agent/mcp.json"
 TOK="${GITHUB_MCP_TOKEN:-$PRIOR_TOK}"
 if [ -z "$TOK" ] && [ "$DRY" = 0 ] && [ -t 0 ]; then read -rsp '   GitHub MCP token (ghp_… ; Enter to skip): ' TOK; echo; fi
-if [ -n "$TOK" ] && [ "$DRY" = 0 ]; then sed -i "s|\${GITHUB_MCP_TOKEN}|$TOK|g" "$H/.kiro/settings/mcp.json"; ok "github MCP token wired"; \
-  else warn "github token not set — edit \${GITHUB_MCP_TOKEN} in mcp.json, or re-run with GITHUB_MCP_TOKEN=ghp_…"; fi
-ok "mcp.json placed (browser-live, burp, memory, github, medium, gmail)"
+if [ -n "$TOK" ] && [ "$DRY" = 0 ]; then sed -i "s|\${GITHUB_MCP_TOKEN}|$TOK|g" "$H/.pi/agent/mcp.json"; ok "github MCP token wired"; \
+  else warn "github token not set — edit \${GITHUB_MCP_TOKEN} in ~/.pi/agent/mcp.json, or re-run with GITHUB_MCP_TOKEN=ghp_…"; fi
+ok "mcp.json placed (browser-live, burp, memory, github, medium, gmail; pihunt-rag added by the RAG step)"
 
 c "4/9  MCP server implementations"
 # browser-live -> ~/.claude/mcp
@@ -101,22 +106,21 @@ else warn "kept existing memory.jsonl (bundled copy at data/memory.jsonl to merg
 warn "gmail MCP: put your OAuth files at $H/.gmail-mcp/{gcp-oauth.keys.json,credentials.json} then auth (npx @gongrzhe/server-gmail-autoauth-mcp auth). NOT bundled (secrets)."
 
 c "5/9  steering + skills + coordinator prompt"
-run "mkdir -p '$H/.kiro/steering' '$H/.kiro/skills' '$H/.pi/agent/skills' '$H/.config/opencode/prompts/claude-agents'"
-run "cp -p '$SRC'/steering/*.md '$H/.kiro/steering/'" && ok "steering"
-run "rsync -a '$SRC/skills/' '$H/.kiro/skills/'" && ok "skills (×17)"
+run "mkdir -p '$H/.pi/agent/steering' '$H/.pi/agent/skills' '$H/.config/opencode/prompts/claude-agents'"
+run "cp -p '$SRC'/steering/*.md '$H/.pi/agent/steering/'" && ok "steering -> ~/.pi/agent/steering"
 run "rsync -a '$SRC/skills/' '$H/.pi/agent/skills/'" && ok "skills (×17) -> ~/.pi/agent/skills (pi runtime)"
 run "cp -p '$SRC/prompts/build.md' '$H/.config/opencode/prompts/claude-agents/build.md'" && ok "coordinator brain (build.md)"
 
 c "5b/9  RAG + knowledge-graph (semantic recall over techniques, memory graph, findings)"
 if [ -f "$SRC/rag/install-rag.sh" ]; then
-  run "bash '$SRC/rag/install-rag.sh' ${DRY:+--dry-run}" && ok "pihunt-rag installed (venv + model2vec + MCP server + index)" \
+  run "bash '$SRC/rag/install-rag.sh' $DRYARG" && ok "pihunt-rag installed (venv + model2vec + MCP server + index)" \
     || warn "RAG install had warnings (see output); fallback embedder keeps it working offline"
 else warn "rag/install-rag.sh not bundled — skipping RAG"; fi
 
 c "6/7  launchers  ->  $H/.local/bin"
 run "mkdir -p '$H/.local/bin'"
 for l in pi-hunt pi-4.8 pi-tier; do [ -f "$SRC/bin/$l" ] || continue; bk "$H/.local/bin/$l"; run "cp -p '$SRC/bin/$l' '$H/.local/bin/$l'"; rehome "$H/.local/bin/$l"; run "chmod +x '$H/.local/bin/$l'"; done
-ok "pi-hunt (OpenRouter), pi-4.8 (flagship toggle), pi-tier (cost tiering)"
+ok "pi-hunt (Kimi Code), pi-4.8 (flagship toggle), pi-tier (cost tiering)"
 # continuous-recon engine + scheduler + registry helper
 if [ -d "$SRC/recon" ]; then
   run "cp -p '$SRC/recon/recon-engine.sh' '$H/.local/bin/pihunt-recon'" && run "chmod +x '$H/.local/bin/pihunt-recon'"
@@ -160,12 +164,13 @@ AGENTS_N="$(ls "$H/.pi/agent/agents/"*.md 2>/dev/null | wc -l)"
 cat <<EOF
 
 -----------------------------------------------------------------------------
- pi-hunt restore complete${DRY:+ (dry-run — nothing changed)}.
+ pi-hunt restore complete${DRYNOTE}.
 
  STILL MACHINE-SPECIFIC (can't be copied):
-   1. Configure OpenRouter authentication locally for Pi. The copied
-      $H/.pi/agent/models.json keeps its apiKey placeholder empty; never add keys to this repo.
-   2. GitHub MCP token                       # GITHUB_MCP_TOKEN=ghp_… ./install.sh  (or edit mcp.json)
+   1. Configure Kimi Code (auth.json) and Google AI Studio (google-direct,
+      mechanical tier) credentials locally. The copied $H/.pi/agent/models.json
+      keeps its apiKey placeholders empty; never add keys to this repo.
+   2. GitHub MCP token                       # GITHUB_MCP_TOKEN=ghp_… ./install.sh  (or edit ~/.pi/agent/mcp.json)
    3. Gmail MCP OAuth                         # $H/.gmail-mcp/{gcp-oauth.keys.json,credentials.json} + auth
    4. Burp Suite app + AI-Agent extension     # the bundled jar bridges to Burp on 127.0.0.1:9876
 
