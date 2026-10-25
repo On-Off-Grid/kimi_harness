@@ -406,6 +406,14 @@ documented.
 
 The shipped provider set is now explicit in `pi-agent/models.json`: 16 flagship
 agents on `kimi-coding/k3`, 2 elite on `kimi-coding/k3.1-pro`, and 8 mechanical on
-`google-direct/gemini-3.1-flash-lite`. `pi-tier` is provider-aware and defaults its
+`google-direct/gemini-3.5-flash-lite`. `pi-tier` is provider-aware and defaults its
 fast ref to the Gemini model; `pi-4.8` only rewrites `kimi-coding/*` lines, so it
 cannot disturb the mechanical tier.
+
+`google-direct` uses Google's native API (`api: "google-generative-ai"`), not the
+OpenAI-compatible shim. Gemini 3 attaches a mandatory `thought_signature` to every
+function call; the OpenAI-compat endpoint returns it under
+`tool_calls[].extra_content.google.thought_signature`, which pi-ai does not
+round-trip. The result is a 400 on the second tool turn. The native path preserves
+the signature. `gemini-3.1-flash-lite` remains in the catalog but is not the default
+while Google's capacity is constrained; `gemini-3.5-flash-lite` is the default.

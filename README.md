@@ -264,7 +264,7 @@ Mechanical agents run on a cheaper **fast** model; reasoning/exploit/validation 
 
 | Tier | Agents | Default model |
 |---|---|---|
-| ⚙️ mechanical | h1/intigriti/yeswehack scope-loaders, recon, test-account-manager, visual-security, payload-researcher, wordlist-curator | `google-direct/gemini-3.1-flash-lite` |
+| ⚙️ mechanical | h1/intigriti/yeswehack scope-loaders, recon, test-account-manager, visual-security, payload-researcher, wordlist-curator | `google-direct/gemini-3.5-flash-lite` |
 | 🧠 flagship (reasoning) | coordinator + 16 remaining specialists | `kimi-coding/k3` |
 | 🏆 elite (validation/redteam) | strict-triager, hypothesis-redteam | `kimi-coding/k3.1-pro` |
 
@@ -358,7 +358,7 @@ subfinder's provider-config plus `GITHUB_TOKEN` for ~28% more subdomains.
 | Env / file | Purpose |
 |---|---|
 | `~/.pi/agent/settings.json` | default provider/model (`kimi-coding`/`k3`), thinking level (`xhigh`), skills dir, retries, compaction |
-| `~/.pi/agent/models.json` | Kimi catalog + `google-direct/gemini-3.1-flash-lite` (mechanical tier) + Ollama placeholder; provider keys live in `auth.json` |
+| `~/.pi/agent/models.json` | Kimi catalog + `google-direct/gemini-3.5-flash-lite` (mechanical tier, native Google API) + Ollama placeholder; provider keys live in `auth.json` |
 | `~/.pi/agent/mcp.json` | deployed MCP server config (from `mcp-config/mcp.json`) |
 | `~/.pi/secrets/*.env` | credentials: kimi, github_mcp, h1_api, intigriti, tuning — **keep `chmod 600`** |
 | `~/.config/pihunt/*.env` | platform/recon envs synced for login shells + systemd units — **keep `chmod 600`** |
@@ -387,7 +387,8 @@ subfinder's provider-config plus `GITHUB_TOKEN` for ~28% more subdomains.
 |---|---|
 | `pi-hunt: command not found` | add `~/.local/bin` to `PATH` (see [Post-install](#post-install-one-time)) |
 | auth/model error from `kimi-coding` | key must be present in BOTH `~/.pi/agent/auth.json` and `~/.pi/secrets/kimi.env`; test: `pi --model kimi-coding/k3 -p "say pong"` |
-| model id not found (`k3`, `k3-256k`, `gemini-3.1-flash-lite`, …) | `~/.pi/agent/models.json` must declare the id under its provider (`kimi-coding`, `google-direct`) |
+| model id not found (`k3`, `k3-256k`, `gemini-3.5-flash-lite`, …) | `~/.pi/agent/models.json` must declare the id under its provider (`kimi-coding`, `google-direct`) |
+| subagent dies on turn 2 with `400 status code (no body)` | `google-direct` must use `api: "google-generative-ai"` (native Google API), not the OpenAI-compat shim; Gemini 3 drops `thought_signature` there. Verify with a tool round-trip. |
 | an MCP server failed at launch | servers attach only at session start — fix `~/.pi/agent/mcp.json` (paths/deps/token) and restart the session |
 | Burp MCP "Not connected" | launch Burp (MCP tab: Enabled ON, host 127.0.0.1 port 9876) **before** `pi-hunt`; the bridge now talks to Burp's SSE server directly (no proxy jar) |
 | GitHub MCP 401 / credential expired | refresh the token in `~/.pi/secrets/github_mcp.env` and relaunch |

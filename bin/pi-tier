@@ -4,15 +4,19 @@
 # Heavy-reasoning agents (exploit creativity, chaining, validation) stay on the
 # flagship Kimi model; mechanical agents (scope loading, recon mapping, account
 # setup, UI observation, payload lookup) run on a cheaper "fast" model — any
-# provider registered in models.json (e.g. google-direct/gemini-3.1-flash-lite,
+# provider registered in models.json (e.g. google-direct/gemini-3.5-flash-lite,
 # mistral-direct/codestral-latest, groq-direct/qwen/qwen3.8-27b) — that does the
 # job for less. This cuts cost/latency on the high-volume mechanical work
 # without dulling the agents that actually find and prove bugs.
 #
+# Gemini 3 function calls require Google's native API (`api: google-generative-ai`):
+# the OpenAI-compatible shim drops the mandatory thought_signature and every
+# subagent 400s on its second tool turn.
+#
 #   pi-tier on        apply tiering (mechanical agents -> fast model, elite pair -> k3.1-pro)
 #   pi-tier off       mechanical agents back to the flagship model (elite pair untouched)
 #   pi-tier status    show current per-agent models
-#   pi-tier set-fast <provider/model>   change the fast model ref (default google-direct/gemini-3.1-flash-lite)
+#   pi-tier set-fast <provider/model>   change the fast model ref (default google-direct/gemini-3.5-flash-lite)
 #
 # Flagship is the most common kimi-coding model among the agents. Fast model ref
 # must exist in ~/.pi/agent/models.json. Effect applies to NEW subagent spawns.
@@ -23,7 +27,7 @@ set -uo pipefail
 AGENTS="$HOME/.pi/agent/agents"
 MODELS_JSON="$HOME/.pi/agent/models.json"
 STATE="$HOME/.pi/agent/.tier-state"
-FAST_DEFAULT="google-direct/gemini-3.1-flash-lite"
+FAST_DEFAULT="google-direct/gemini-3.5-flash-lite"
 KIMI="kimi-coding"
 
 # Elite pair: highest-value validation/redteam agents, pinned to k3.1-pro.

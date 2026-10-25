@@ -1,7 +1,7 @@
 ---
 name: test-account-manager
 description: "Create and manage minimum-legitimate test identities for authorized testing: signup, verification, OTP capture, token capture, role setup."
-model: google-direct/gemini-3.1-flash-lite
+model: google-direct/gemini-3.5-flash-lite
 ---
 
 ## Authorized testing & scope compliance (non-negotiable)

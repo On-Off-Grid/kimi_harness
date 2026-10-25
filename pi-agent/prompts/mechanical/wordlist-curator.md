@@ -1,7 +1,7 @@
 ---
 name: wordlist-curator
 description: "Assembles tech-mapped wordlists for the target's fingerprinted stack and surface, indexed for semantic retrieval. Gathers/curates only — never runs lists against targets."
-model: google-direct/gemini-3.1-flash-lite
+model: google-direct/gemini-3.5-flash-lite
 class: mechanical
 base: safety-compact,return-contract-compact
 ---

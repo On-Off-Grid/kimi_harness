@@ -1,7 +1,7 @@
 ---
 name: visual-security
 description: "Browser-state analyst: finds security-relevant UI states — client-side-only authz, cross-role leakage, stale privileged data — not cosmetic bugs."
-model: google-direct/gemini-3.1-flash-lite
+model: google-direct/gemini-3.5-flash-lite
 ---
 
 ## Authorized testing & scope compliance (non-negotiable)

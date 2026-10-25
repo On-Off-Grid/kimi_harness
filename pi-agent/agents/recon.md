@@ -1,7 +1,7 @@
 ---
 name: recon
 description: "Attack-surface mapper that converts scope into prioritized endpoints, identities, and trust boundaries. Use for complete surface mapping before specialist testing."
-model: google-direct/gemini-3.1-flash-lite
+model: google-direct/gemini-3.5-flash-lite
 skills: [recon-checklist, critical-endpoints, recon-arsenal]
 ---
 

@@ -3,7 +3,7 @@
 > [!WARNING]
 > Historical Kiro-era snapshot. The active runtime uses Kimi Code:
 > `kimi-coding/k3` flagship, `kimi-coding/k3.1-pro` elite,
-> `google-direct/gemini-3.1-flash-lite` mechanical tier, and
+> `google-direct/gemini-3.5-flash-lite` mechanical tier, and
 > `kimi-coding/k3-256k` for compaction. Gateway health commands below are
 > reference material, not the current startup procedure.
 
@@ -24,10 +24,10 @@ commands here whenever a session starts cold, after a reboot, or when recon outp
 
 | Component | Healthy state | How to check |
 |---|---|---|
-| **Provider config** | `defaultProvider: kimi-coding`, default `k3`; mechanical `google-direct/gemini-3.1-flash-lite` | inspect `~/.pi/agent/{models,settings}.json` |
+| **Provider config** | `defaultProvider: kimi-coding`, default `k3`; mechanical `google-direct/gemini-3.5-flash-lite` | inspect `~/.pi/agent/{models,settings}.json` |
 | **Launchers** | `pi-hunt`, `pi-4.8`, `pi-tier`; `pi-kiro` is legacy-only | `ls $PIHUNT_HOME/bin/` |
 | **Agents** | 26 installed (`~/.pi/agent/agents/*.md`) | `ls ~/.pi/agent/agents/ | wc -l` |
-| **Model tiering** | 8 mechanical → `google-direct/gemini-3.1-flash-lite`, 16 flagship → `kimi-coding/k3`, 2 elite → `kimi-coding/k3.1-pro` | `pi-tier status` |
+| **Model tiering** | 8 mechanical → `google-direct/gemini-3.5-flash-lite`, 16 flagship → `kimi-coding/k3`, 2 elite → `kimi-coding/k3.1-pro` | `pi-tier status` |
 | **Skills** | 17 skills, gate green | `node bin/prompt-gate.mjs --repo` |
 | **MCP servers** | 7 wired: browser-live, burp, memory, github, medium, pihunt-rag, gmail | `cat ~/.pi/agent/mcp.json` / `/mcp` inside pi |
 | **RAG** | `total` climbs; `by_source` has findings + techniques + memory + recon | `pihunt-rag stats` |

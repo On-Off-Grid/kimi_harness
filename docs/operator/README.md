@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > Current runtime: Kimi Code. Flagship `kimi-coding/k3`, elite `kimi-coding/k3.1-pro`,
-> mechanical `google-direct/gemini-3.1-flash-lite`, compaction `kimi-coding/k3-256k`.
+> mechanical `google-direct/gemini-3.5-flash-lite`, compaction `kimi-coding/k3-256k`.
 > Kiro gateway material is legacy/reference-only.
 
 Practical guides for running and maintaining pi-hunt. Read in order.
@@ -26,7 +26,7 @@ Quick start:
 pi-hunt
 > Hunt <program> in <HackerOne|Intigriti> for <CRITICAL|HIGH|CRITICAL/EXCEPTIONAL>
 ```
-Health check: confirm `kimi-coding` / `k3` (and `google-direct/gemini-3.1-flash-lite`
+Health check: confirm `kimi-coding` / `k3` (and `google-direct/gemini-3.5-flash-lite`
 for mechanical agents) in `~/.pi/agent/{models,settings}.json`; the gateway sweep is
 historical only.
 Everything writes to `reports/<program>/...`; pi-hunt never submits to a platform.

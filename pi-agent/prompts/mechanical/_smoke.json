@@ -2,41 +2,41 @@
   "h1-scope-loader": {
     "input": "Handle: testprog. Platform: HackerOne. $H1_API is NOT set in your environment (missing). No local scope files exist. Do NOT call any tools — produce your final coordinator result right now.",
     "expect": ["testprog", "fallback|missing|401|403|404|not found|private|blocker|error"],
-    "providers": ["google-direct/gemini-3.1-flash-lite", "google-direct/gemini-3.5-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
+    "providers": ["google-direct/gemini-3.5-flash-lite", "google-direct/gemini-3.1-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
   },
   "intigriti-scope-loader": {
     "input": "Handle: demo-shop. Platform: Intigriti. $INTIGRITI_APP is NOT set (missing credentials). No local scope files exist. Do NOT call any tools — produce your final coordinator result right now.",
     "expect": ["demo-shop", "fallback|missing|blocker|401|403|404|not found|public page|credentials"],
-    "providers": ["google-direct/gemini-3.1-flash-lite", "google-direct/gemini-3.5-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
+    "providers": ["google-direct/gemini-3.5-flash-lite", "google-direct/gemini-3.1-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
   },
   "yeswehack-scope-loader": {
     "input": "Handle: ywh-demo. Platform: YesWeHack. $YWH_API credentials are NOT configured. Do NOT call any tools — produce your final result right now.",
     "expect": ["ywh-demo", "fallback|missing|blocker|private|401|403|404|credentials"],
-    "providers": ["google-direct/gemini-3.1-flash-lite", "google-direct/gemini-3.5-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
+    "providers": ["google-direct/gemini-3.5-flash-lite", "google-direct/gemini-3.1-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
   },
   "payload-researcher": {
     "input": "Objective: SQLi in a PHP+MySQL login form, POST /login with params email and password, behind Cloudflare WAF, error messages suppressed. Do NOT call any tools — produce your final result right now from your own knowledge.",
     "expect": ["Tier 1", "Negative Control", "Recommended Next Step"],
-    "providers": ["mistral-direct/codestral-latest", "google-direct/gemini-3.1-flash-lite", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
+    "providers": ["mistral-direct/codestral-latest", "google-direct/gemini-3.5-flash-lite", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
   },
   "test-account-manager": {
     "input": "Program: acme (Intigriti). Objective: create 2 legitimate test accounts for an IDOR test; signup is email-only. You already tried and signup is blocked by a CAPTCHA wall you cannot solve. Do NOT call any tools — produce your final summary right now.",
     "expect": ["blocked|captcha", "status|artifact|reports/|next"],
-    "providers": ["google-direct/gemini-3.1-flash-lite", "google-direct/gemini-3.5-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
+    "providers": ["google-direct/gemini-3.5-flash-lite", "google-direct/gemini-3.1-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
   },
   "visual-security": {
     "input": "Target: e-commerce dashboard (in-scope app.shop.example.com). Observed in browser: (1) an /admin link visible to normal logged-in users, (2) order detail ?order=42 returns another user's order when changed to ?order=43, (3) session cookie stays valid after logout. Do NOT call any tools — produce your final summary right now.",
     "expect": ["admin", "order|idor|cross-role|other user", "status|specialist|next|@s"],
-    "providers": ["google-direct/gemini-3.1-flash-lite", "google-direct/gemini-3.5-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
+    "providers": ["google-direct/gemini-3.5-flash-lite", "google-direct/gemini-3.1-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
   },
   "wordlist-curator": {
     "input": "Target fingerprint: nginx + PHP/WordPress site. Requested surfaces: content discovery + parameter discovery. The pihunt-wordlist/RAG tooling is present but for this exercise produce your final summary from knowledge ONLY — list exactly which lists you would index, with name, path, tags, and entries, and how hunters pull them.",
     "expect": ["wordpress|wp", "param|burp-parameter|assetnote", "tag|path"],
-    "providers": ["mistral-direct/codestral-latest", "google-direct/gemini-3.1-flash-lite", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
+    "providers": ["mistral-direct/codestral-latest", "google-direct/gemini-3.5-flash-lite", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
   },
   "recon": {
     "input": "Program: demo (scope confirmed: *.shop.example.com). tech-stack.md: nginx, Node/Express, React SPA, REST API under /api/v1. js_endpoints.txt lists /api/v1/admin/export and an exposed Sentry DSN. Do NOT call any tools — produce the prioritized attack-surface map and artifact plan right now.",
     "expect": ["admin", "/api/v1|route", "specialist|handoff|@|@llm|@recon", "subdomains_live|structured-recon|artifact"],
-    "providers": ["google-direct/gemini-3.1-flash-lite", "google-direct/gemini-3.5-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
+    "providers": ["google-direct/gemini-3.5-flash-lite", "google-direct/gemini-3.1-flash-lite", "mistral-direct/codestral-latest", "freellm/deepseek-v4-flash", "freellm/allam-2-7b"]
   }
 }

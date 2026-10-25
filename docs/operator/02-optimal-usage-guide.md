@@ -5,7 +5,7 @@ and commands. Grounded in the live install on this box (2026-10-25)._
 
 pi-hunt is a **bug-bounty coordinator** running on Kimi Code `kimi-coding/k3` at max
 reasoning, with 26 specialist subagents (8 mechanical on
-`google-direct/gemini-3.1-flash-lite`), 7 MCP servers, a RAG knowledge base, and a
+`google-direct/gemini-3.5-flash-lite`), 7 MCP servers, a RAG knowledge base, and a
 continuous recon engine. You steer it in natural language; it delegates, chains,
 validates, and writes report artifacts to disk. It never submits to a platform — it
 stops at local report creation.
@@ -42,7 +42,7 @@ Stop markers the coordinator emits: `[[HUNT_COMPLETE]]` (done/exhausted) or
 | `pi-hunt` | Coordinator brain (build.md + workflow + pi adapter) on k3, all subagents + MCP. This is the hunt entrypoint. |
 | `pi-4.8` | Flagship toggle: `k3` ↔ `k3.1-pro`; does not touch the mechanical tier. |
 | `pi-kiro` | Legacy Kiro wrapper; not part of the default runtime path. |
-| `pi-tier on\|off\|status` | Cost tiering: mechanical agents → `google-direct/gemini-3.1-flash-lite`, flagship stays on `kimi-coding/k3`, elite on `k3.1-pro`. Affects **new** subagent spawns. |
+| `pi-tier on\|off\|status` | Cost tiering: mechanical agents → `google-direct/gemini-3.5-flash-lite`, flagship stays on `kimi-coding/k3`, elite on `k3.1-pro`. Affects **new** subagent spawns. |
 
 `make -C pi-hunt status` shows per-agent models + RAG stats. `make -C pi-hunt help`
 lists install/rag targets.

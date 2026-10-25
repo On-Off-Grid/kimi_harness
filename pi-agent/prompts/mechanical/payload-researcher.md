@@ -1,7 +1,7 @@
 ---
 name: payload-researcher
 description: "Current-technique researcher for scenario-specific payloads, wordlists, and tool strategies. Give one exact objective per call."
-model: google-direct/gemini-3.1-flash-lite
+model: google-direct/gemini-3.5-flash-lite
 class: mechanical
 base: safety-compact,return-contract-compact
 ---

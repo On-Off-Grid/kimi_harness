@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > The host-specific measurements below are historical. The provider migration is
 > complete: Kimi Code is the default path (`k3` flagship, `k3.1-pro` elite,
-> `google-direct/gemini-3.1-flash-lite` mechanical); Kiro gateway assets are retained
+> `google-direct/gemini-3.5-flash-lite` mechanical); Kiro gateway assets are retained
 > only as legacy/reference material.
 
 _Snapshot: 2026-07-07. This is the stepping-stone document: where pi-hunt stands
@@ -20,7 +20,7 @@ material change so the next session starts from truth, not memory._
   (`xhigh`, 60k thinking budget), auto-continue watchdog + compact-on-46 empty-trigger
   enabled.
 - **Agents:** 26 specialists installed (`~/.pi/agent/agents/`). Tiering active — 8
-  mechanical agents on `google-direct/gemini-3.1-flash-lite`, 16 flagship agents on
+  mechanical agents on `google-direct/gemini-3.5-flash-lite`, 16 flagship agents on
   `kimi-coding/k3`, 2 elite agents on `kimi-coding/k3.1-pro`; compaction summarizes
   with `kimi-coding/k3-256k`.
 - **MCP servers (7):** browser-live, burp, memory, github (remote), medium,

@@ -1,7 +1,7 @@
 ---
 name: intigriti-scope-loader
 description: "Intigriti scope and rules loader with API-first extraction and strict no-guessing behavior. Use before any active testing begins."
-model: google-direct/gemini-3.1-flash-lite
+model: google-direct/gemini-3.5-flash-lite
 ---
 
 ## Authorized testing & scope compliance (non-negotiable)
