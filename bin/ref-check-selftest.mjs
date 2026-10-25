@@ -67,8 +67,8 @@ function makeFixture() {
   return { dir, repo, home };
 }
 
-function run(fx) {
-  const r = spawnSync(process.execPath, [CHECK], {
+function run(fx, args = []) {
+  const r = spawnSync(process.execPath, [CHECK, ...args], {
     env: { ...process.env, REFCHECK_REPO: fx.repo, REFCHECK_HOME: fx.home },
     encoding: "utf8",
   });
@@ -76,21 +76,39 @@ function run(fx) {
 }
 
 const cases = [];
-const check = (name, mutate, expect) => {
+const check = (name, mutate, expect, args = []) => {
   const fx = makeFixture();
   mutate(fx);
-  const { code, out } = run(fx);
+  const { code, out } = run(fx, args);
   const ok = code !== 0 && expect.test(out);
   cases.push({ name, ok, detail: ok ? "" : `exit=${code} expected /${expect.source}/` });
   if (!ok) console.log(`   --- output ---\n${out.split("\n").filter((l) => l.includes("FAIL")).slice(0, 6).join("\n")}`);
   fs.rmSync(fx.dir, { recursive: true, force: true });
 };
 
-// 0. clean fixture must pass
+// 0. clean fixture must pass in full and repo-only modes
+for (const args of [[], ["--repo"]]) {
+  const fx = makeFixture();
+  const { code, out } = run(fx, args);
+  const label = args.length ? "clean fixture passes --repo" : "clean fixture passes";
+  cases.push({ name: label, ok: code === 0, detail: code === 0 ? "" : out.slice(-400) });
+  fs.rmSync(fx.dir, { recursive: true, force: true });
+}
+
+// 0b. repo-only mode accepts a tool that the installer will provide.
 {
   const fx = makeFixture();
-  const { code, out } = run(fx);
-  cases.push({ name: "clean fixture passes", ok: code === 0, detail: code === 0 ? "" : out.slice(-400) });
+  fs.mkdirSync(path.join(fx.repo, "recon"), { recursive: true });
+  fs.writeFileSync(path.join(fx.repo, "recon/fixture.sh"), "#!/bin/sh\n");
+  fs.appendFileSync(path.join(fx.repo, "install.sh"),
+    "cp -p '$SRC/recon/fixture.sh' '$H/.local/bin/pihunt-fixture'\n");
+  fs.appendFileSync(path.join(fx.repo, "pi-agent/agents/fixture-hunter.md"), "\nRun `pihunt-fixture`.\n");
+  const { code, out } = run(fx, ["--repo"]);
+  cases.push({
+    name: "repo-only accepts installer-mapped tool",
+    ok: code === 0,
+    detail: code === 0 ? "" : out.slice(-400),
+  });
   fs.rmSync(fx.dir, { recursive: true, force: true });
 }
 
@@ -133,6 +151,11 @@ check("uninstalled tool reference", (fx) => {
   const p = path.join(fx.repo, "pi-agent/agents/fixture-hunter.md");
   fs.appendFileSync(p, "\nRun `pihunt-definitely-not-installed`.\n");
 }, /pihunt-definitely-not-installed.*not installed/i);
+
+check("repo-only rejects unmapped tool", (fx) => {
+  const p = path.join(fx.repo, "pi-agent/agents/fixture-hunter.md");
+  fs.appendFileSync(p, "\nRun `pihunt-definitely-not-installed`.\n");
+}, /pihunt-definitely-not-installed.*no repo source or installer mapping/i, ["--repo"]);
 
 check("mechanical delta over budget", (fx) => {
   fs.appendFileSync(path.join(fx.repo, "pi-agent/prompts/mechanical/fixture-hunter.md"),

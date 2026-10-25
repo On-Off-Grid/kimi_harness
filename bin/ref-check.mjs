@@ -25,6 +25,7 @@
  * (~/.pi/agent/agents) when the latter exists — defect 1 only manifested at deploy time.
  *
  *   node bin/ref-check.mjs            # full gate (deploy tree if present)
+ *   node bin/ref-check.mjs --repo     # repo-only (CI: no deploy tree/installed tools)
  *   node bin/ref-check.mjs --verbose  # list every resolved reference
  */
 import fs from "node:fs";
@@ -42,7 +43,9 @@ const REPO_SKILLS = path.join(REPO, "skills");
 const DEPLOY_SKILLS = path.join(HOME, ".pi", "agent", "skills");
 const MANIFEST = path.join(REPO_SKILLS, "manifest.json");
 const INSTALL = path.join(REPO, "install.sh");
+const RAG_INSTALL = path.join(REPO, "rag", "install-rag.sh");
 const VERBOSE = process.argv.includes("--verbose");
+const REPO_ONLY = process.argv.includes("--repo");
 
 const fails = [];
 const warns = [];
@@ -108,6 +111,32 @@ for (const [name, meta] of Object.entries(manifestSkills)) {
 
 /* --------------------------------------------- installer covers every dest */
 const installTxt = exists(INSTALL) ? read(INSTALL) : "";
+const ragInstallTxt = exists(RAG_INSTALL) ? read(RAG_INSTALL) : "";
+
+// Repo-only mode must not require tools to be installed on the CI runner. It
+// instead proves each referenced pihunt-* tool has a repo source and an
+// installer mapping, so a fresh `install.sh` will actually provide it.
+const installerToolSources = new Map();
+for (const m of installTxt.matchAll(
+  /cp\s+-p\s+['"]\$SRC\/([^'"]+)['"]\s+['"]\$H\/\.local\/bin\/(pihunt-[a-z0-9-]+)['"]/g,
+)) {
+  installerToolSources.set(m[2], m[1]);
+}
+for (const m of installTxt.matchAll(/\b([a-z0-9-]+):(pihunt-[a-z0-9-]+)\b/g)) {
+  if (!installerToolSources.has(m[2])) installerToolSources.set(m[2], `recon/${m[1]}.sh`);
+}
+if (/\.local\/bin\/pihunt-rag/.test(ragInstallTxt)) {
+  installerToolSources.set("pihunt-rag", "rag/install-rag.sh");
+}
+function repoSourceForTool(tool) {
+  for (const rel of [`bin/${tool}`, `rag/${tool}`]) {
+    if (exists(path.join(REPO, rel))) return rel;
+  }
+  const src = installerToolSources.get(tool);
+  if (src && exists(path.join(REPO, src))) return src;
+  return null;
+}
+
 for (const dest of deployDests) {
   const rel = dest.replace(/^~\//, "");
   const re = new RegExp(`rsync\\s+-a\\s+['"]\\$SRC/skills/['"]\\s+['"]\\$H/${escapeRe(rel)}/['"]`);
@@ -129,7 +158,7 @@ for (const d of repoSkillDirs) {
 }
 
 /* ---------------------------------------------------------- agent scan */
-const deployedSkillsPresent = exists(DEPLOY_SKILLS);
+const deployedSkillsPresent = !REPO_ONLY && exists(DEPLOY_SKILLS);
 const repoSkillNames = repoSkillDirs;
 const nameRe = new Map(repoSkillNames.map((n) => [n, new RegExp(`(?<![a-z0-9-])${escapeRe(n)}(?![a-z0-9-])`, "i")]));
 const REPO_PREFIXES = ["bin", "rag", "pi-agent", "steering", "prompts", "docs", "extensions"];
@@ -191,6 +220,15 @@ function scanTree(label, dir) {
     // 4. pihunt-* tool references
     for (const m of body.matchAll(/\bpihunt-[a-z0-9-]+\b/g)) {
       const tool = m[0];
+      if (REPO_ONLY) {
+        const src = repoSourceForTool(tool);
+        if (!src) fail(`${label}/${name}`, `tool ${tool}: no repo source or installer mapping (would be dead on arrival)`);
+        else {
+          refCount++;
+          rows.push({ agent: name, kind: "tool", ref: tool, repo: `OK (${src})`, manifest: "-", deployed: "installer" });
+        }
+        continue;
+      }
       const ok = exists(path.join(REPO, "bin", tool)) || exists(path.join(REPO, "rag", tool)) ||
         exists(path.join(HOME, ".local/bin", tool)) || exists(path.join(HOME, ".pi/agent/bin", tool)) || inPath(tool);
       if (!ok) fail(`${label}/${name}`, `tool ${tool}: not installed (repo bin/rag, ~/.local/bin, PATH)`);
@@ -214,8 +252,8 @@ function scanTree(label, dir) {
 }
 
 scanTree("repo", REPO_AGENTS);
-if (exists(DEPLOY_AGENTS)) scanTree("deployed", DEPLOY_AGENTS);
-else console.log("\n== deployed: SKIPPED (no ~/.pi/agent/agents — CI/repo-only mode)");
+if (!REPO_ONLY && exists(DEPLOY_AGENTS)) scanTree("deployed", DEPLOY_AGENTS);
+else console.log(`\n== deployed: SKIPPED (${REPO_ONLY ? "--repo" : "no ~/.pi/agent/agents — CI/repo-only mode"})`);
 
 /* ------------------------------------------------------- deploy parity */
 if (deployedSkillsPresent) {
@@ -232,14 +270,16 @@ if (deployedSkillsPresent) {
 
 // Every deploy destination that exists on this machine must carry every repo skill,
 // byte-identical. A destination that is only half-populated is dead on arrival too.
-for (const dest of deployDests) {
-  const abs = path.join(HOME, dest.replace(/^~\//, ""));
-  if (!exists(abs)) continue;
-  const present = new Set(fs.readdirSync(abs).filter((d) => exists(path.join(abs, d, "SKILL.md"))));
-  for (const d of repoSkillDirs) {
-    if (!present.has(d)) fail("deploy-coverage", `repo skill "${d}" is missing from ${dest}`);
-    else if (read(path.join(abs, d, "SKILL.md")) !== read(path.join(REPO_SKILLS, d, "SKILL.md")))
-      fail("deploy-coverage", `skill "${d}" in ${dest} differs from repo source`);
+if (!REPO_ONLY) {
+  for (const dest of deployDests) {
+    const abs = path.join(HOME, dest.replace(/^~\//, ""));
+    if (!exists(abs)) continue;
+    const present = new Set(fs.readdirSync(abs).filter((d) => exists(path.join(abs, d, "SKILL.md"))));
+    for (const d of repoSkillDirs) {
+      if (!present.has(d)) fail("deploy-coverage", `repo skill "${d}" is missing from ${dest}`);
+      else if (read(path.join(abs, d, "SKILL.md")) !== read(path.join(REPO_SKILLS, d, "SKILL.md")))
+        fail("deploy-coverage", `skill "${d}" in ${dest} differs from repo source`);
+    }
   }
 }
 

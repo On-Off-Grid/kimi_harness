@@ -23,7 +23,7 @@ const repoOnly = process.argv.includes("--repo");
 const stages = [
   ["build drift", "prompt-build.mjs", ["--check"]],
   ["content / signature", "signature-check.mjs", repoOnly ? ["--repo"] : []],
-  ["references / budgets / schema", "ref-check.mjs", []],
+  ["references / budgets / schema", "ref-check.mjs", repoOnly ? ["--repo"] : []],
   ["gate self-test", "ref-check-selftest.mjs", []],
 ];
 
