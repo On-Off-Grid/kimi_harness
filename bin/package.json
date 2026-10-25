@@ -1,0 +1,9 @@
+{
+  "name": "pi-hunt-prompts-tools",
+  "private": true,
+  "type": "module",
+  "description": "Token accounting for the agent-prompt refactor (bin/tsize.mjs, bin/prompt-build.mjs)",
+  "dependencies": {
+    "js-tiktoken": "1.0.21"
+  }
+}

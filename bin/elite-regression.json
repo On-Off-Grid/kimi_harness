@@ -1,0 +1,28 @@
+{
+  "tests": [
+    {
+      "id": "dup-1",
+      "class": "duplicate",
+      "input": "FINDING CANDIDATE: POST /api/v1/users/42 (authenticated). Response body contains full user object of user 43 when authenticated as user 42. Repro: curl -H 'Authorization: Bearer <token42>' https://app.shop.example.com/api/v1/users/42 -> returns user 43's email, SSN, address. Suggests broken object-level authorization.",
+      "known_context": "Existing report #1234 (same endpoint, same 42->43 user swap, already validated).",
+      "expect_verdict": "reject",
+      "expect_reason": "duplicate"
+    },
+    {
+      "id": "known-1",
+      "class": "known-vuln",
+      "input": "FINDING CANDIDATE: GET /login reflects ?next=javascript:alert(document.domain) into a meta-refresh without sanitization; confirmed in a private bug-bounty app.",
+      "known_context": "CWE-79 (reflected XSS via javascript: URL scheme). Known-pattern match — CVE-2023-XXXXX documents identical scheme; no novel angle or bypass added.",
+      "expect_verdict": "reject",
+      "expect_reason": "novel|duplicate|known|pattern|cve|cwe"
+    },
+    {
+      "id": "novel-1",
+      "class": "novel",
+      "input": "FINDING CANDIDATE: POST /api/v2/cart/checkout with two concurrent requests (single-packet turbo) applies a 30%-off coupon twice, total charge = 70% of price.\nREPRO (artifacts in reports/acme-race/2026-.../):\n  title.txt: 'Coupon double-apply race in /api/v2/cart/checkout'\n  description.md: full self-contained curl repro (both requests + the single-request negative control charging full price), auth header, expected output per step\n  weakness.txt: CWE-362 (race)\n  severity.txt: high (financial)\n  asset.txt: app.shop.example.com/api/v2/cart/checkout\n  impact.md: any user can buy at 30% off by racing the coupon\n  files/ contains the captured responses.\n\nNo prior report mentions this endpoint's coupon race; report/ and memory search found no duplicate.",
+      "known_context": "No prior report. No known CVE matches the app's custom coupon-redemption flow. Memory MCP searched — no dup. Artifact directory reports/acme-race/ exists with full evidence.",
+      "expect_verdict": "accept",
+      "expect_reason": "valid|needs work|accept|replay"
+    }
+  ]
+}

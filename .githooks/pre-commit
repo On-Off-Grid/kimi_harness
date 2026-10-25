@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+# pre-commit: block commits where the deployed agents / repo mirror drift from
+# the prompt sources in pi-agent/prompts/.
+#
+#   Fix: make prompts && git add pi-agent/agents
+#   Bypass (use sparingly): git commit --no-verify
+#
+# Install once: make hooks   (sets core.hooksPath=.githooks)
+
+set -u
+
+if [ ! -f bin/prompt-build.mjs ]; then
+  exit 0
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: node not found — skipping prompt drift check" >&2
+  exit 0
+fi
+
+if ! node bin/prompt-build.mjs --check; then
+  echo "" >&2
+  echo "pre-commit: BLOCKED — agent prompts have drifted from their sources." >&2
+  echo "  Run 'make prompts' to rebuild from pi-agent/prompts/, then 'git add pi-agent/agents'." >&2
+  exit 1
+fi

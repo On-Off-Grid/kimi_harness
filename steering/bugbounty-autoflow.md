@@ -3,6 +3,11 @@ Global bug bounty workflow for this profile:
 ## Subagent return contract (MANDATORY)
 - Return Contract: Checkpoint reports/Memory MCP incrementally. Stop before turn limit. End on a structured text summary (tested, evidence, status, next actions). Never return empty (a tool call or empty return discards all work).
 
+## Human-intervention alerts (MANDATORY)
+- When you are genuinely blocked on something only a human can do — solving a CAPTCHA/human-verification, entering a 2FA/OTP code, completing a payment or account verification, manual identity proof, a proxy/IP unblock, or an out-of-scope legal call — output a line containing `NEED_HUMAN: <one-line reason>` in your visible response, then continue with any other productive work you can still do (do not stall waiting for the human).
+- `NEED_HUMAN` is a machine-read marker (the human-alert extension sounds the operator's desk); use it only for true human blockers, not ordinary errors, retryable failures, or scope ambiguity (resolve those per the blocker/return rules above).
+- Subagents surface blockers to the parent per the return contract; add `NEED_HUMAN:` only when the blocker also needs the operator physically, so both the parent and the human hear about it.
+
 When user intent is `Hunt <PROGRAM>` (or equivalent bug bounty hunt request), follow this order:
 
 0. Treat every explicitly named command, tool invocation, MCP use, subagent call, report artifact, and checkpoint step in the active agent or subagent prompt as mandatory unless it is technically impossible, outside confirmed scope, or blocked by missing credentials or unavailable infrastructure.

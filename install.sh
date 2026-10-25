@@ -48,7 +48,7 @@ if [ "$(pi --version 2>/dev/null)" = "0.79.0" ]; then ok "pi 0.79.0 already inst
 
 c "2/9  pi agent config  ->  $H/.pi/agent"
 run "mkdir -p '$H/.pi/agent'"; bk "$H/.pi/agent"
-run "rsync -a '$SRC/pi-agent/' '$H/.pi/agent/'" && ok "23 agents, extensions (mcp-bridge, subagent ensemble/swarm + MCP profiles, auto-continue), models.json, settings.json, prompts, adapter"
+run "rsync -a '$SRC/pi-agent/' '$H/.pi/agent/'" && ok "26 agents, extensions (mcp-bridge, subagent ensemble/swarm + MCP profiles, auto-continue), models.json, settings.json, prompts, adapter"
 [ "$DRY" = 0 ] && grep -Ilr "$OLD_HOME" "$H/.pi/agent" 2>/dev/null | while read -r f; do sed -i "s|$OLD_HOME|$H|g" "$f"; done
 [ -f "$H/.pi/agent/extensions/mcp-bridge/package.json" ] && npmdeps "$H/.pi/agent/extensions/mcp-bridge"
 [ -f "$H/.pi/agent/bin/fd" ] && chmod +x "$H/.pi/agent/bin/fd" 2>/dev/null
@@ -101,9 +101,10 @@ else warn "kept existing memory.jsonl (bundled copy at data/memory.jsonl to merg
 warn "gmail MCP: put your OAuth files at $H/.gmail-mcp/{gcp-oauth.keys.json,credentials.json} then auth (npx @gongrzhe/server-gmail-autoauth-mcp auth). NOT bundled (secrets)."
 
 c "5/9  steering + skills + coordinator prompt"
-run "mkdir -p '$H/.kiro/steering' '$H/.kiro/skills' '$H/.config/opencode/prompts/claude-agents'"
+run "mkdir -p '$H/.kiro/steering' '$H/.kiro/skills' '$H/.pi/agent/skills' '$H/.config/opencode/prompts/claude-agents'"
 run "cp -p '$SRC'/steering/*.md '$H/.kiro/steering/'" && ok "steering"
-run "rsync -a '$SRC/skills/' '$H/.kiro/skills/'" && ok "skills (×9)"
+run "rsync -a '$SRC/skills/' '$H/.kiro/skills/'" && ok "skills (×16)"
+run "rsync -a '$SRC/skills/' '$H/.pi/agent/skills/'" && ok "skills (×16) -> ~/.pi/agent/skills (pi runtime)"
 run "cp -p '$SRC/prompts/build.md' '$H/.config/opencode/prompts/claude-agents/build.md'" && ok "coordinator brain (build.md)"
 
 c "5b/9  RAG + knowledge-graph (semantic recall over techniques, memory graph, findings)"
