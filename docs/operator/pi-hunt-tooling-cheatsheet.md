@@ -21,6 +21,23 @@ All synthesis tools are program-agnostic: default program `digitalocean`, overri
 
 ---
 
+## ⚠ Deploy model (edit-then-redeploy gotcha)
+
+`pi-hunt`, `pi-4.8`, and `pi-tier` run from `~/.local/bin` as **copies** deployed by `install.sh`.
+Editing the repo's `bin/` version does **not** change the command on your `PATH` until you redeploy:
+
+```bash
+cp -p bin/pi-tier ~/.local/bin/pi-tier && chmod +x ~/.local/bin/pi-tier   # or re-run install.sh
+```
+Symptom of a stale copy: a usage error that omits a flag you added (e.g. `pi-tier coord-health`
+"usage: …{…|amd-fallback}" with no `coord-health`). Agents/prompts deploy the same way — that is
+what the prompt-gate "build drift" check guards.
+
+By contrast, **`pihunt-gadgets` and `pihunt-authz` are NOT on `PATH`** and must be run repo-relative
+(`bin/pihunt-gadgets …` from the repo root), because they resolve `reports/<prog>/` relative to the repo.
+
+---
+
 ## 1. Launch & drive
 
 ```bash
