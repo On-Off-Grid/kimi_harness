@@ -75,8 +75,17 @@ Refs are `provider/model[:thinking]` and must exist in `~/.pi/agent/models.json`
 ```bash
 pi-tier hybrid watch 300 &        # elite pair Kimi<->AMD on Kimi's 5h quota window
 pi-tier amd-fallback watch 300 &  # AMD $1/day cap -> OpenRouter, back on reset
-pi-tier coord-health watch 120 &  # coordinator provider down -> stage healthy fallback (NEW)
+pi-tier coord-health watch 120 &  # coordinator provider down -> stage healthy fallback
+pi-tier concurrency watch 300 &   # scale PI_SUBAGENT_MAX_CONCURRENCY to # providers up (NEW)
 ```
+
+**concurrency** scaling: sets `PI_SUBAGENT_MAX_CONCURRENCY` in `pihunt-tuning.env` from how many
+providers are usable — all three (OpenRouter+AMD+Kimi) → 6, two → 4, OpenRouter-only or none → 3.
+Like the coordinator model it **applies at the next launch**, and the env is read at process start,
+so **re-source `pihunt-tuning.env` (or open a new shell) and launch fresh** — resuming a paused
+session keeps its old concurrency. `pi-tier concurrency status` shows current vs desired. Note it
+counts AMD as "up" only when its `$1/day` budget probe returns 200, so a capped/flapping AMD keeps
+you at the conservative value (correct: capped AMD routes to paid OpenRouter via `amd-fallback`).
 Status / stop any of them:
 ```bash
 pi-tier hybrid status | amd-fallback status | coord-health status

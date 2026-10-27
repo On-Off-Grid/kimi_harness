@@ -40,6 +40,13 @@
 #                                      cannot relaunch the TUI, so a running frozen
 #                                      hunt still needs a manual relaunch — but the
 #                                      relaunch then comes up on a healthy provider.
+#   pi-tier concurrency [once|watch [sec]|status|off]
+#                                      Scale PI_SUBAGENT_MAX_CONCURRENCY by how many
+#                                      LLM providers are up: all three (OpenRouter +
+#                                      AMD + Kimi) -> high (6); two -> mid (4);
+#                                      OpenRouter-only or none -> base (3). Writes
+#                                      pihunt-tuning.env; applies at NEXT launch, so
+#                                      re-source that env / open a new shell first.
 #
 # Fast/hunter/coordinator refs must exist in ~/.pi/agent/models.json. Effect
 # applies to NEW subagent spawns; a running session keeps its model until relaunch.
@@ -468,6 +475,78 @@ coordh_status(){
 
 coordh_off(){ if [ -f "$COORDH_PID" ] && kill -0 "$(cat "$COORDH_PID" 2>/dev/null)" 2>/dev/null; then kill "$(cat "$COORDH_PID")" 2>/dev/null && ok "coord-health watcher stopped"; else ok "no coord-health watcher running"; fi; rm -f "$COORDH_PID"; }
 
+# ---------------- Provider-availability concurrency scaling ----------------
+# PI_SUBAGENT_MAX_CONCURRENCY (in pihunt-tuning.env) caps simultaneous subagents.
+# Scale it by how many LLM providers are usable right now: more free capacity ->
+# fan out wider; OpenRouter-only (paid) -> stay conservative at the base. The
+# subagent runner also self-throttles on the RAM floor, so raising this is safe.
+# Applies at NEXT launch (pi reads the env at start); re-source pihunt-tuning.env
+# or open a new shell before relaunching.
+TUNING_ENV="$HOME/.pi/secrets/pihunt-tuning.env"
+CONCWATCH_PID="$HOME/.pi/agent/.concwatch.pid"
+CONCWATCH_LOG="$HOME/.pi/agent/concurrency.log"
+CONC_HIGH=6    # all three providers up (OpenRouter + AMD + Kimi)
+CONC_MID=4     # two providers up
+CONC_BASE=3    # OpenRouter-only (paid) or none
+
+conc_current(){ grep -oE 'PI_SUBAGENT_MAX_CONCURRENCY=[0-9]+' "$TUNING_ENV" 2>/dev/null | head -1 | grep -oE '[0-9]+'; }
+
+conc_providers(){ # echoes "<count>|<space-separated up list>"
+  local n=0 up=""
+  openrouter_usable && { n=$((n+1)); up="$up openrouter"; }
+  amd_usable        && { n=$((n+1)); up="$up amd"; }
+  kimi_available    && { n=$((n+1)); up="$up kimi"; }
+  echo "$n|$up"
+}
+
+conc_desired(){ # $1=count $2=up-list -> echoes desired concurrency
+  local n="$1" up="$2"
+  case "$n" in
+    3) echo "$CONC_HIGH" ;;
+    0) echo "$CONC_BASE" ;;
+    1) if echo "$up" | grep -qw openrouter; then echo "$CONC_BASE"; else echo "$CONC_MID"; fi ;;
+    *) echo "$CONC_MID" ;;
+  esac
+}
+
+conc_set(){ # $1=value (preserves the trailing comment)
+  if grep -qE '^export PI_SUBAGENT_MAX_CONCURRENCY=' "$TUNING_ENV" 2>/dev/null; then
+    sed -i -E "s|^(export PI_SUBAGENT_MAX_CONCURRENCY=)[0-9]+|\1$1|" "$TUNING_ENV"
+  else
+    echo "export PI_SUBAGENT_MAX_CONCURRENCY=$1" >> "$TUNING_ENV"
+  fi
+}
+
+conc_reconcile(){ # prints on transition; 0 = changed
+  local pr n up cur want
+  pr=$(conc_providers); n=${pr%%|*}; up=${pr#*|}
+  cur=$(conc_current); want=$(conc_desired "$n" "$up"); [ -n "$cur" ] || cur="unset"
+  if [ "$want" != "$cur" ]; then
+    conc_set "$want"
+    printf '%s concurrency: %s -> %s (%d providers up:%s) — applies at next launch; re-source pihunt-tuning.env\n' \
+      "$(date '+%F %T')" "$cur" "$want" "$n" "${up:- none}" | tee -a "$CONCWATCH_LOG"
+    return 0
+  fi
+  printf '%s concurrency: steady (%s, %d up:%s)\n' "$(date '+%F %T')" "$cur" "$n" "${up:- none}" >> "$CONCWATCH_LOG"
+  return 1
+}
+
+conc_watch(){ local iv="${1:-300}"; echo $$ > "$CONCWATCH_PID"; ok "concurrency watch (pid $$, every ${iv}s). Log: $CONCWATCH_LOG"; trap 'rm -f "$CONCWATCH_PID"; exit 0' INT TERM; conc_reconcile || true; while sleep "$iv"; do conc_reconcile || true; done; }
+
+conc_status(){
+  local pr n up cur want
+  pr=$(conc_providers); n=${pr%%|*}; up=${pr#*|}
+  cur=$(conc_current); want=$(conc_desired "$n" "$up")
+  echo "  PI_SUBAGENT_MAX_CONCURRENCY : ${cur:-unset}  (file: $TUNING_ENV)"
+  echo "  providers up                : $n —${up:- none}"
+  echo "  desired for this state      : $want  (high=$CONC_HIGH mid=$CONC_MID base=$CONC_BASE)"
+  if [ "${cur:-}" = "$want" ]; then echo "  status                      : in sync"; else echo "  status                      : OUT OF SYNC — run 'pi-tier concurrency once', then re-source + relaunch"; fi
+  if [ -f "$CONCWATCH_PID" ] && kill -0 "$(cat "$CONCWATCH_PID" 2>/dev/null)" 2>/dev/null; then echo "  watcher                     : running (pid $(cat "$CONCWATCH_PID"))"; else echo "  watcher                     : not running"; fi
+  [ -f "$CONCWATCH_LOG" ] && { echo "  recent:"; grep -- '->' "$CONCWATCH_LOG" 2>/dev/null | tail -3 | sed 's/^/    /'; }
+}
+
+conc_off(){ if [ -f "$CONCWATCH_PID" ] && kill -0 "$(cat "$CONCWATCH_PID" 2>/dev/null)" 2>/dev/null; then kill "$(cat "$CONCWATCH_PID")" 2>/dev/null && ok "concurrency watcher stopped"; else ok "no concurrency watcher running"; fi; rm -f "$CONCWATCH_PID"; }
+
 case "${1:-status}" in
   on) apply_on ;;
   off) apply_off ;;
@@ -517,6 +596,14 @@ case "${1:-status}" in
     [ -n "${2:-}" ] || { err "usage: pi-tier clear-agent <agent>"; exit 1; }
     clear_agent "$2" ;;
   status|"") status ;;
-  -h|--help|help) sed -n '2,41p' "$0" | sed 's/^#\s\?//' ;;
-  *) err "usage: pi-tier {on|off|status|set-fast|set-hunter|set-flagship|set-coordinator|set-agent|clear-agent|hybrid|amd-fallback|coord-health}";;
+  concurrency)
+    case "${2:-once}" in
+      once|reconcile) conc_reconcile || true; conc_status ;;
+      watch) conc_watch "${3:-300}" ;;
+      status) conc_status ;;
+      off|stop) conc_off ;;
+      *) err "usage: pi-tier concurrency {once|watch [sec]|status|off}" ;;
+    esac ;;
+  -h|--help|help) sed -n '2,/^set -uo pipefail/p' "$0" | sed '/^set -uo pipefail/d; s/^#\s\?//' ;;
+  *) err "usage: pi-tier {on|off|status|set-fast|set-hunter|set-flagship|set-coordinator|set-agent|clear-agent|hybrid|amd-fallback|coord-health|concurrency}";;
 esac
