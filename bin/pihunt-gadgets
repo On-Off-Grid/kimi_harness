@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""pihunt-gadgets — synthesise the gadget graph into escalation leverage.
+
+Reads a per-program capability graph (gadget-graph.jsonl) and re-arm triggers
+(rearm-triggers.jsonl), and answers the one question a flat vector list can't:
+*which single missing primitive, if obtained, unblocks the most (and highest-tier)
+escalation chains?*
+
+Model
+-----
+  gadget : status=confirmed -> GRANTS capabilities. negative = probe ran, the
+           capability does NOT exist (recorded so it isn't re-hunted blindly).
+  chain  : NEEDS capabilities; grants an outcome at a `tier`. Composable when every
+           need is granted by a confirmed gadget.
+Capability classes (by prefix):
+  probe.*   -> an observation you can make THIS run with the fleet  (ACTIONABLE)
+  account.* -> provisioning state
+  else      -> an external gadget that must be DISCOVERED (redirect./ciphertext./...)
+
+Only reads graph/trigger/case files; prints no credentials.
+
+Usage:
+  pihunt-gadgets rank     [--program P]   ranked missing-capability shopping list
+  pihunt-gadgets chains   [--program P]   per-chain composability
+  pihunt-gadgets triggers [--program P]   which re-arm triggers are ARMED vs WAITING
+  pihunt-gadgets check    [--program P]   exit 10 if any trigger is ARMED (for recon)
+  pihunt-gadgets report   [--program P]   write structured-recon/gadgets-report.md
+Default program: digitalocean (or $PIHUNT_PROGRAM).
+"""
+import json
+import os
+import sys
+
+TIERS = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def program(argv):
+    for i, a in enumerate(argv):
+        if a == "--program" and i + 1 < len(argv):
+            return argv[i + 1]
+    return os.environ.get("PIHUNT_PROGRAM", "digitalocean")
+
+
+def recon_dir(prog):
+    return os.path.join(ROOT, "reports", prog, "structured-recon")
+
+
+def load_jsonl(path):
+    out = []
+    if not os.path.exists(path):
+        return out
+    with open(path) as f:
+        for ln in f:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                out.append(json.loads(ln))
+            except json.JSONDecodeError as e:
+                sys.stderr.write(f"warn: bad line in {path}: {e}\n")
+    return out
+
+
+def load_graph(prog):
+    nodes = load_jsonl(os.path.join(recon_dir(prog), "gadget-graph.jsonl"))
+    gadgets = [n for n in nodes if n.get("kind") == "gadget"]
+    chains = [n for n in nodes if n.get("kind") == "chain"]
+    granted = set()      # capabilities a confirmed gadget grants
+    negative = set()     # capabilities a probe ran and found absent
+    for g in gadgets:
+        tgt = granted if g.get("status") == "confirmed" else (
+            negative if g.get("status") == "negative" else set())
+        for c in g.get("grants", []):
+            tgt.add(c)
+    return gadgets, chains, granted, negative
+
+
+def cls(cap):
+    if cap.startswith("probe."):
+        return "probe"
+    if cap.startswith("account."):
+        return "account"
+    return "gadget"
+
+
+CLS_LABEL = {
+    "probe": "ACTIONABLE (run the probe)",
+    "account": "PROVISIONING",
+    "gadget": "DISCOVER external gadget",
+}
+# actionable first so the fleet-doable work sorts to the top within a tier
+CLS_RANK = {"probe": 2, "account": 1, "gadget": 0}
+
+
+def composability(chains, granted):
+    rows = []
+    for ch in chains:
+        needs = ch.get("needs", [])
+        missing = [n for n in needs if n not in granted]
+        rows.append({
+            "id": ch["id"],
+            "tier": ch.get("tier", "info"),
+            "status": ch.get("status", "?"),
+            "case": ch.get("case"),
+            "needs": needs,
+            "missing": missing,
+            "composable": not missing,
+            "note": ch.get("note", ""),
+        })
+    return rows
+
+
+def rank_missing(rows, negative):
+    """For each unmet capability, how many chains it blocks + the top tier."""
+    agg = {}
+    for r in rows:
+        if r["composable"]:
+            continue
+        for cap in r["missing"]:
+            a = agg.setdefault(cap, {"cap": cap, "chains": [], "tier": 0})
+            a["chains"].append(r["id"])
+            a["tier"] = max(a["tier"], TIERS.get(r["tier"], 0))
+    items = list(agg.values())
+    for a in items:
+        a["class"] = cls(a["cap"])
+        a["probed_negative"] = a["cap"] in negative
+        a["n"] = len(a["chains"])
+    items.sort(key=lambda a: (a["tier"], CLS_RANK[a["class"]], a["n"]), reverse=True)
+    return items
+
+
+def tier_name(v):
+    for k, n in TIERS.items():
+        if n == v:
+            return k
+    return str(v)
+
+
+def cmd_rank(prog, out=sys.stdout):
+    _, chains, granted, negative = load_graph(prog)
+    rows = composability(chains, granted)
+    items = rank_missing(rows, negative)
+    ncomp = sum(1 for r in rows if r["composable"])
+    print(f"# Missing-primitive leverage — {prog}", file=out)
+    print(f"# {len(chains)} chains, {ncomp} composable now. "
+          f"Ranked by (max tier unblocked, actionable-first, #chains).\n", file=out)
+    hdr = f"{'CAPABILITY':<46} {'TIER':<9} {'#':<3} {'CLASS':<26} CHAINS"
+    print(hdr, file=out)
+    print("-" * len(hdr), file=out)
+    for a in items:
+        flag = " [probed-negative]" if a["probed_negative"] else ""
+        print(f"{a['cap']:<46} {tier_name(a['tier']):<9} {a['n']:<3} "
+              f"{CLS_LABEL[a['class']]:<26} {','.join(a['chains'])}{flag}", file=out)
+    if not items:
+        print("(every chain is composable — go test)", file=out)
+    return items
+
+
+def cmd_chains(prog, out=sys.stdout):
+    _, chains, granted, _ = load_graph(prog)
+    rows = composability(chains, granted)
+    rows.sort(key=lambda r: (r["composable"], -TIERS.get(r["tier"], 0)))
+    print(f"# Chain composability — {prog}\n", file=out)
+    for r in rows:
+        mark = "COMPOSABLE" if r["composable"] else f"missing: {', '.join(r['missing'])}"
+        case = f" [{r['case']}]" if r["case"] else ""
+        print(f"[{r['tier']:>8}] {r['id']:<18} {r['status']:<14} {mark}{case}", file=out)
+    return rows
+
+
+def eval_triggers(prog):
+    _, _, granted, _ = load_graph(prog)
+    trigs = [t for t in load_jsonl(os.path.join(recon_dir(prog), "rearm-triggers.jsonl"))
+             if t.get("kind") != "meta"]
+    armed, waiting = [], []
+    for t in trigs:
+        (armed if t.get("when_capability") in granted else waiting).append(t)
+    return armed, waiting
+
+
+def cmd_triggers(prog, out=sys.stdout):
+    armed, waiting = eval_triggers(prog)
+    print(f"# Re-arm triggers — {prog}\n", file=out)
+    if armed:
+        print("## ARMED — a watched capability now exists; spend budget here:\n", file=out)
+        for t in armed:
+            print(f"  ★ {t['id']}  (cap: {t['when_capability']})", file=out)
+            print(f"      reopen: {', '.join(t.get('reopen_cases', [])) or '-'} | "
+                  f"arms: {', '.join(t.get('arms_chains', [])) or '-'}", file=out)
+            print(f"      action: {t.get('action','')}\n", file=out)
+    else:
+        print("## ARMED: none\n", file=out)
+    print("## WAITING — watch recon for these capabilities:\n", file=out)
+    for t in waiting:
+        print(f"  · {t['id']:<28} needs: {t['when_capability']}", file=out)
+        print(f"      source: {t.get('source','')}", file=out)
+    return armed, waiting
+
+
+def cmd_check(prog):
+    armed, _ = eval_triggers(prog)
+    if armed:
+        sys.stderr.write(
+            f"pihunt-gadgets: {len(armed)} ARMED trigger(s) for {prog}: "
+            f"{', '.join(t['id'] for t in armed)} — run `pihunt-gadgets triggers`\n")
+        return 10
+    sys.stderr.write(f"pihunt-gadgets: no armed triggers for {prog}\n")
+    return 0
+
+
+def cmd_report(prog):
+    path = os.path.join(recon_dir(prog), "gadgets-report.md")
+    import io
+    buf = io.StringIO()
+    buf.write(f"# Gadget-graph synthesis — {prog}\n\n")
+    buf.write("Generated by `pihunt-gadgets report`. Source of truth: "
+              "`gadget-graph.jsonl` + `rearm-triggers.jsonl` in this directory.\n\n")
+    buf.write("## 1. Where to spend the next run (ranked missing primitives)\n\n```\n")
+    cmd_rank(prog, out=buf)
+    buf.write("```\n\n> Actionable-class rows are probes the fleet can run now; "
+              "discover-class rows wait on an external gadget recon must find.\n\n")
+    buf.write("## 2. Chain composability\n\n```\n")
+    cmd_chains(prog, out=buf)
+    buf.write("```\n\n## 3. Re-arm triggers\n\n```\n")
+    cmd_triggers(prog, out=buf)
+    buf.write("```\n")
+    with open(path, "w") as f:
+        f.write(buf.getvalue())
+    print(f"wrote {path}")
+    return 0
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    cmd, prog = argv[0], program(argv[1:])
+    if cmd == "rank":
+        cmd_rank(prog)
+    elif cmd == "chains":
+        cmd_chains(prog)
+    elif cmd == "triggers":
+        cmd_triggers(prog)
+    elif cmd == "check":
+        return cmd_check(prog)
+    elif cmd == "report":
+        return cmd_report(prog)
+    else:
+        sys.stderr.write(f"unknown command: {cmd}\n")
+        print(__doc__)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

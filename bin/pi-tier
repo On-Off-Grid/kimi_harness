@@ -1,43 +1,70 @@
 #!/usr/bin/env bash
 # pi-tier — cost/perf model tiering for the pi-hunt subagents.
 #
-# Heavy-reasoning agents (exploit creativity, chaining, validation) stay on the
-# flagship Kimi model; mechanical agents (scope loading, recon mapping, account
-# setup, UI observation, payload lookup) run on a cheaper "fast" model — any
-# provider registered in models.json (e.g. google-direct/gemini-3.5-flash-lite,
-# mistral-direct/codestral-latest, groq-direct/qwen/qwen3.8-27b) — that does the
-# job for less. This cuts cost/latency on the high-volume mechanical work
-# without dulling the agents that actually find and prove bugs.
+# Three subagent classes:
+#   mechanical (8)             scope loading, recon mapping, account setup, UI
+#                              observation, payload lookup -> fast ref (Mistral)
+#   hunters (all other agents) exploit/analysis specialists -> hunter ref
+#                              (DeepSeek V4.1 Flash on AMD)
+#   elite pair                 strict-triager + hypothesis-redteam -> Kimi k3.1-pro
 #
-# Gemini 3 function calls require Google's native API (`api: google-generative-ai`):
-# the OpenAI-compatible shim drops the mandatory thought_signature and every
-# subagent 400s on its second tool turn.
+# The coordinator is separate: `pi-tier set-coordinator <provider/model[:thinking]>`
+# writes ~/.pi/agent/.coordinator-model, which pi-hunt reads at launch. This keeps
+# Kimi reserved for the elite pair while the coordinator runs on the cheap provider.
 #
-#   pi-tier on        apply tiering (mechanical agents -> fast model, elite pair -> k3.1-pro)
-#   pi-tier off       mechanical agents back to the flagship model (elite pair untouched)
-#   pi-tier status    show current per-agent models
-#   pi-tier set-fast <provider/model>   change the fast model ref (default google-direct/gemini-3.5-flash-lite)
+#   pi-tier on                         apply tiering (mechanical/hunters/elite)
+#   pi-tier off                        mechanical + hunters -> Kimi flagship fallback
+#   pi-tier status                     show current per-agent models and state
+#   pi-tier set-fast <provider/model>  change the mechanical model ref
+#   pi-tier set-hunter <provider/model> change the hunter model ref
+#   pi-tier set-flagship <model>       change the Kimi fallback used by `off`
+#   pi-tier set-coordinator <ref>      change the pi-hunt coordinator model
+#   pi-tier hybrid [once|watch [sec]|status|off] [--coord]
+#                                      Kimi/AMD failover: run elite pair on Kimi
+#                                      while its 5h quota is up, auto-revert to AMD
+#                                      on 429, and return to Kimi when it resets.
+#                                      'once' reconciles now; 'watch' polls (default
+#                                      120s) and flips on each transition. Coordinator
+#                                      stays on AMD unless --coord is given (it is the
+#                                      per-turn token hog that exhausts the quota).
+#                                      Elite applies at next subagent spawn; a
+#                                      coordinator change applies at next launch.
+#   pi-tier coord-health [once|watch [sec]|status|off]
+#                                      Coordinator-provider failover. Probes the
+#                                      coordinator's current provider; if it is
+#                                      down (429/402/401/unreachable) — the cause
+#                                      of a silent hunt freeze — stages the first
+#                                      healthy fallback (OpenRouter -> AMD -> Kimi)
+#                                      into the coordinator slot for the next
+#                                      launch and logs/announces it loudly. It
+#                                      cannot relaunch the TUI, so a running frozen
+#                                      hunt still needs a manual relaunch — but the
+#                                      relaunch then comes up on a healthy provider.
 #
-# Flagship is the most common kimi-coding model among the agents. Fast model ref
-# must exist in ~/.pi/agent/models.json. Effect applies to NEW subagent spawns.
-# The elite pair (strict-triager, hypothesis-redteam) is always pinned to
-# kimi-coding/k3.1-pro and is protected from any flattening.
+# Fast/hunter/coordinator refs must exist in ~/.pi/agent/models.json. Effect
+# applies to NEW subagent spawns; a running session keeps its model until relaunch.
+# The elite pair is always pinned to kimi-coding/k3.1-pro.
 set -uo pipefail
 
 AGENTS="$HOME/.pi/agent/agents"
 MODELS_JSON="$HOME/.pi/agent/models.json"
-STATE="$HOME/.pi/agent/.tier-state"
-FAST_DEFAULT="google-direct/gemini-3.5-flash-lite"
+FAST_STATE="$HOME/.pi/agent/.tier-state"
+HUNTER_STATE="$HOME/.pi/agent/.hunter-state"
+FLAGSHIP_STATE="$HOME/.pi/agent/.flagship-state"
+COORD_STATE="$HOME/.pi/agent/.coordinator-model"
+OVERRIDES_FILE="$HOME/.pi/agent/.agent-overrides"
+FAST_DEFAULT="mistral-direct/codestral-latest"
+HUNTER_DEFAULT="amd-radeon/DeepSeek-V4.1-Flash"
+FLAGSHIP_DEFAULT="kimi-coding/k3"
+COORD_DEFAULT="amd-radeon/DeepSeek-V4.1-Flash:high"
 KIMI="kimi-coding"
 
-# Elite pair: highest-value validation/redteam agents, pinned to k3.1-pro.
 ELITE_AGENTS=(
   strict-triager
   hypothesis-redteam
 )
 ELITE_DEFAULT="kimi-coding/k3.1-pro"
 
-# Mechanical agents that run on the fast model when tiering is ON.
 FAST_AGENTS=(
   h1-scope-loader
   intigriti-scope-loader
@@ -50,88 +77,446 @@ FAST_AGENTS=(
 )
 
 ok(){ printf '  \033[1;32m✓\033[0m %s\n' "$*"; }
-err(){ printf '  \033[1;31m✗ %s\n' "$*"; }
+err(){ printf '  \033[1;31m✗ %s\033[0m\n' "$*"; }
 
-fast_ref(){
-  local ref
-  ref=$([ -f "$STATE" ] && grep -m1 . "$STATE" 2>/dev/null || true)
-  # normalize legacy bare ids (pre multi-provider)
+norm_ref(){ # bare kimi ids are accepted for backwards compatibility
+  local ref="${1:-}"
   case "$ref" in
-    ""|claude-sonnet-4.6|anthropic/claude-sonnet-4.6) echo "$FAST_DEFAULT";;
+    "" ) echo "";;
     k3-256k|k3|k3.1-pro|k3.1-pro-highspeed) echo "$KIMI/$ref";;
     */*) echo "$ref";;
     *) echo "$KIMI/$ref";;
   esac
 }
 
-flagship(){
-  # the model the bulk of agents currently use (mode), among kimi-coding refs
-  grep -hoE 'model:\s*kimi-coding/[a-zA-Z0-9.-]+' "$AGENTS"/*.md 2>/dev/null \
-    | sed 's|model:\s*||' | sort | uniq -c | sort -rn | awk 'NR==1{print $2}'
+state_ref(){ # file, default
+  local ref
+  ref=$( [ -f "$1" ] && grep -m1 . "$1" 2>/dev/null || true )
+  [ -n "$ref" ] && norm_ref "$ref" || norm_ref "$2"
 }
 
-have_model(){
-  # $1 = provider/model ref
-  grep -q "\"id\":\s*\"${1#*/}\"" "$MODELS_JSON" 2>/dev/null
+fast_ref(){ state_ref "$FAST_STATE" "$FAST_DEFAULT"; }
+hunter_ref(){ state_ref "$HUNTER_STATE" "$HUNTER_DEFAULT"; }
+flagship_ref(){ state_ref "$FLAGSHIP_STATE" "$FLAGSHIP_DEFAULT"; }
+coord_ref(){ state_ref "$COORD_STATE" "$COORD_DEFAULT"; }
+
+have_model(){ # $1 = provider/model[:thinking]  (ollama ids may contain a :tag)
+  local raw="${1#*/}"
+  grep -q "\"id\":[[:space:]]*\"$raw\"" "$MODELS_JSON" 2>/dev/null && return 0
+  local base="${raw%:*}"
+  [ "$base" != "$raw" ] && grep -q "\"id\":[[:space:]]*\"$base\"" "$MODELS_JSON" 2>/dev/null
 }
 
 set_model(){ # $1=agent file, $2=full provider/model ref
-  sed -i -E "s|^model:\s*.*$|model: $2|" "$1"
+  sed -i -E "s|^model:[[:space:]]*.*$|model: $2|" "$1"
+}
+
+apply_overrides(){ # re-apply per-agent overrides on top of tier defaults
+  [ -f "$OVERRIDES_FILE" ] || return 0
+  local line a ref n=0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in \#*) continue;; esac
+    a="${line%%=*}"; ref="${line#*=}"
+    [ -f "$AGENTS/$a.md" ] || continue
+    have_model "$ref" || { err "override $a -> $ref not in models.json (skipped)"; continue; }
+    set_model "$AGENTS/$a.md" "$ref"; n=$((n+1))
+  done < "$OVERRIDES_FILE"
+  [ "$n" -gt 0 ] && ok "re-applied $n per-agent override(s)"
+  return 0
+}
+
+set_agent(){ # $1=agent $2=provider/model[:thinking]
+  local a="$1" ref; ref=$(norm_ref "$2")
+  [ -f "$AGENTS/$a.md" ] || { err "no such agent: $a (see 'pi-tier status')"; exit 1; }
+  case "$ref" in */*) ;; *) err "ref must be provider/model (got '$ref')"; exit 1;; esac
+  have_model "$ref" || { err "model '${ref#*/}' not in models.json"; exit 1; }
+  mkdir -p "$(dirname "$OVERRIDES_FILE")"; touch "$OVERRIDES_FILE"
+  grep -vE "^$a=" "$OVERRIDES_FILE" > "$OVERRIDES_FILE.tmp" 2>/dev/null || true
+  echo "$a=$ref" >> "$OVERRIDES_FILE.tmp"; mv "$OVERRIDES_FILE.tmp" "$OVERRIDES_FILE"
+  set_model "$AGENTS/$a.md" "$ref"
+  ok "agent $a -> $ref (persisted; survives 'pi-tier on')"
+}
+
+clear_agent(){ # $1=agent  (remove override, reset to tier default)
+  local a="$1" ref
+  [ -f "$OVERRIDES_FILE" ] && { grep -vE "^$a=" "$OVERRIDES_FILE" > "$OVERRIDES_FILE.tmp" 2>/dev/null || true; mv "$OVERRIDES_FILE.tmp" "$OVERRIDES_FILE"; }
+  if is_fast_agent "$a"; then ref=$(fast_ref)
+  elif is_elite_agent "$a"; then ref="$ELITE_DEFAULT"
+  else ref=$(hunter_ref); fi
+  [ -f "$AGENTS/$a.md" ] && set_model "$AGENTS/$a.md" "$ref"
+  ok "agent $a override cleared -> $ref"
 }
 
 is_fast_agent(){ local a="$1"; for x in "${FAST_AGENTS[@]}"; do [ "$x" = "$a" ] && return 0; done; return 1; }
 is_elite_agent(){ local a="$1"; for x in "${ELITE_AGENTS[@]}"; do [ "$x" = "$a" ] && return 0; done; return 1; }
+is_hunter_agent(){ is_fast_agent "$1" && return 1; is_elite_agent "$1" && return 1; return 0; }
 
 agent_ref(){ # $1=agent file -> first provider/model ref found
-  grep -m1 -oE 'model:\s*[a-zA-Z0-9-]+/[a-zA-Z0-9./-]+' "$1" 2>/dev/null | sed -E 's|^model:\s*||'
+  grep -m1 -oE 'model:[[:space:]]*[a-zA-Z0-9-]+/[a-zA-Z0-9./:-]+' "$1" 2>/dev/null | sed -E 's|^model:[[:space:]]*||'
 }
 
 status(){
-  local n=0 nf=0 ne=0
-  printf '  %-26s %-34s %s\n' "AGENT" "MODEL" "CLASS"
+  local n=0 nf=0 ne=0 nh=0
+  printf '  %-26s %-40s %s\n' "AGENT" "MODEL" "CLASS"
   for f in "$AGENTS"/*.md; do
     local a m; a=$(basename "$f" .md); m=$(agent_ref "$f")
-    if is_fast_agent "$a"; then printf '  %-26s %-34s (mechanical)\n' "$a" "$m"; nf=$((nf+1))
-    elif is_elite_agent "$a"; then printf '  %-26s %-34s (elite)\n' "$a" "$m"; ne=$((ne+1))
-    else printf '  %-26s %-34s\n' "$a" "$m"; fi
+    if is_fast_agent "$a"; then printf '  %-26s %-40s (mechanical)\n' "$a" "$m"; nf=$((nf+1))
+    elif is_elite_agent "$a"; then printf '  %-26s %-40s (elite)\n' "$a" "$m"; ne=$((ne+1))
+    else printf '  %-26s %-40s (hunter)\n' "$a" "$m"; nh=$((nh+1)); fi
     n=$((n+1))
   done
-  echo "  fast ref = $(fast_ref) | flagship = $(flagship) | $n agents ($nf mechanical, $ne elite)"
+  echo "  fast=$(fast_ref) | hunter=$(hunter_ref) | kimi-fallback=$(flagship_ref) | coordinator=$(coord_ref)"
+  [ -s "$OVERRIDES_FILE" ] && echo "  per-agent overrides: $(grep -cvE '^[[:space:]]*(#|$)' "$OVERRIDES_FILE") (see $OVERRIDES_FILE)"
+  echo "  $n agents ($nf mechanical, $nh hunters, $ne elite)"
 }
 
+apply_on(){
+  local FM HM
+  FM=$(fast_ref); HM=$(hunter_ref)
+  case "$FM" in */*) ;; *) err "fast ref must be provider/model (got '$FM')"; exit 1;; esac
+  case "$HM" in */*) ;; *) err "hunter ref must be provider/model (got '$HM')"; exit 1;; esac
+  have_model "$FM" || { err "fast model '${FM#*/}' not in models.json"; exit 1; }
+  have_model "$HM" || { err "hunter model '${HM#*/}' not in models.json"; exit 1; }
+  for f in "$AGENTS"/*.md; do
+    a=$(basename "$f" .md)
+    if is_fast_agent "$a"; then set_model "$f" "$FM"
+    elif is_elite_agent "$a"; then set_model "$f" "$ELITE_DEFAULT"
+    else set_model "$f" "$HM"; fi
+  done
+  ok "tiering ON: ${#FAST_AGENTS[@]} mechanical -> $FM | hunters -> $HM | ${#ELITE_AGENTS[@]} elite -> $ELITE_DEFAULT"
+  ok "coordinator unchanged: $(coord_ref) (use 'pi-tier set-coordinator <ref>' to change)"
+  apply_overrides
+  status
+}
+
+apply_off(){
+  local FL
+  FL=$(flagship_ref)
+  case "$FL" in */*) ;; *) err "flagship ref must be provider/model (got '$FL')"; exit 1;; esac
+  have_model "$FL" || { err "flagship model '${FL#*/}' not in models.json"; exit 1; }
+  for f in "$AGENTS"/*.md; do
+    a=$(basename "$f" .md)
+    if is_elite_agent "$a"; then set_model "$f" "$ELITE_DEFAULT"
+    else set_model "$f" "$FL"; fi
+  done
+  ok "tiering OFF: all non-elite agents -> $FL | elite stays $ELITE_DEFAULT"
+  ok "coordinator unchanged: $(coord_ref)"
+  apply_overrides
+  status
+}
+
+set_state(){
+  local file="$1" ref="$2" label="$3"
+  ref=$(norm_ref "$ref")
+  case "$ref" in */*) ;; *) err "$label ref must be provider/model (got '$ref')"; exit 1;; esac
+  have_model "$ref" || { err "model '${ref#*/}' not in models.json"; exit 1; }
+  echo "$ref" > "$file"; ok "$label ref = $ref (run 'pi-tier on' to apply)"
+}
+
+# ---------------- hybrid Kimi/AMD failover ----------------
+# Uses Kimi for the elite pair (and optionally the coordinator) while Kimi's
+# 5-hour quota is available, and auto-falls back to AMD when Kimi returns 429.
+# The coordinator is pinned to AMD by default (it runs every turn and is what
+# exhausts the Kimi quota); pass --coord to include it in the hybrid too.
+HYBRID_STATE="$HOME/.pi/agent/.hybrid-provider"
+HYBRID_PID="$HOME/.pi/agent/.hybrid.pid"
+HYBRID_LOG="$HOME/.pi/agent/hybrid.log"
+HYBRID_ELITE_KIMI="kimi-coding/k3.1-pro"
+HYBRID_ELITE_AMD="openrouter/deepseek/deepseek-v4.1-flash"   # Kimi-down fallback: PAID OpenRouter DeepSeek V4.1-Flash (reasoning, 32k out) — free AMD reasoning model is quota-limited
+HYBRID_COORD_KIMI="kimi-coding/k3.1-pro:high"
+HYBRID_COORD_AMD="amd-radeon/DeepSeek-V4-Flash:high"
+HYBRID_KEY_ENV="$HOME/.pi/secrets/kimi.env"
+HYBRID_URL="https://api.kimi.com/coding/v1/chat/completions"
+# Kimi quota is a 5h window that resets on a fixed schedule. Anchor to the known
+# reset 2026-10-27 05:00:00 GMT; each window caps at 5h. The 429 poll is ground
+# truth within a window; the schedule avoids wasted polls during cooldown and
+# enforces the per-window cap (once 429'd, stay off Kimi until the window rolls).
+HYBRID_KIMI_ANCHOR=1793077200          # 2026-10-27 05:00:00 UTC
+HYBRID_KIMI_WINDOW=18000               # 5h cap per session/window (seconds)
+HYBRID_KIMI_CAP_FILE="$HOME/.pi/agent/.hybrid-kimi-capped-until"
+
+kimi_available(){ # 0 = quota up, 1 = 429/unreachable
+  local key code
+  [ -f "$HYBRID_KEY_ENV" ] && . "$HYBRID_KEY_ENV" 2>/dev/null
+  key="${KIMI_API_KEY:-}"; [ -n "$key" ] || return 1
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$HYBRID_URL" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $key" \
+    -d '{"model":"k3.1-pro","messages":[{"role":"user","content":"x"}],"max_tokens":1}' 2>/dev/null || echo 000)
+  case "$code" in 200|400) return 0;; *) return 1;; esac
+}
+
+kimi_win_bounds(){ # echoes "win_start win_end" for the window containing now (>=anchor)
+  local now k; now=$(date +%s)
+  k=$(( (now - HYBRID_KIMI_ANCHOR) / HYBRID_KIMI_WINDOW ))
+  echo "$(( HYBRID_KIMI_ANCHOR + k*HYBRID_KIMI_WINDOW )) $(( HYBRID_KIMI_ANCHOR + (k+1)*HYBRID_KIMI_WINDOW ))"
+}
+
+kimi_usable(){ # schedule + 5h cap + 429 ground truth; 0 = use Kimi
+  local now capped we
+  now=$(date +%s)
+  [ "$now" -lt "$HYBRID_KIMI_ANCHOR" ] && return 1          # pre-first-reset cooldown
+  capped=$(cat "$HYBRID_KIMI_CAP_FILE" 2>/dev/null || echo 0)
+  [ "$capped" -gt "$now" ] && return 1                      # already capped this window
+  if kimi_available; then return 0; fi
+  we=$(kimi_win_bounds); we=${we#* }                        # window end
+  echo "$we" > "$HYBRID_KIMI_CAP_FILE"                      # 429 -> capped until window rolls
+  return 1
+}
+
+hybrid_apply(){ # $1=kimi|amd  $2=with_coord(0/1)
+  local prov="$1" coord="${2:-0}" a eref cref
+  if [ "$prov" = kimi ]; then eref="$HYBRID_ELITE_KIMI"; cref="$HYBRID_COORD_KIMI"
+  else eref="$HYBRID_ELITE_AMD"; cref="$HYBRID_COORD_AMD"; fi
+  for a in "${ELITE_AGENTS[@]}"; do [ -f "$AGENTS/$a.md" ] && set_model "$AGENTS/$a.md" "$eref"; done
+  [ "$coord" = 1 ] && echo "$cref" > "$COORD_STATE"
+  printf '%s\n' "$prov" > "$HYBRID_STATE"
+}
+
+hybrid_reconcile(){ # $1=with_coord(0/1); prints on transition; 0=changed
+  local cur desired want_coord="${1:-0}"
+  cur=$(cat "$HYBRID_STATE" 2>/dev/null || echo "")
+  if kimi_usable; then desired=kimi; else desired=amd; fi
+  if [ "$desired" != "$cur" ]; then
+    hybrid_apply "$desired" "$want_coord"
+    local note="elite$([ "$want_coord" = 1 ] && echo "+coordinator")"
+    printf '%s hybrid: %s -> %s (kimi %s) — %s now %s; coordinator applies at next launch, elite at next subagent spawn\n' \
+      "$(date '+%F %T')" "${cur:-none}" "$desired" "$([ "$desired" = kimi ] && echo UP || echo BLOCKED)" "$note" "$desired" | tee -a "$HYBRID_LOG"
+    return 0
+  fi
+  printf '%s hybrid: steady (%s)\n' "$(date '+%F %T')" "$desired" >> "$HYBRID_LOG"
+  return 1
+}
+
+hybrid_watch(){ # $1=interval $2=with_coord
+  local iv="${1:-120}" wc="${2:-0}"
+  echo $$ > "$HYBRID_PID"
+  ok "hybrid watch started (pid $$, every ${iv}s, coord=$([ "$wc" = 1 ] && echo yes || echo no)). Log: $HYBRID_LOG"
+  trap 'rm -f "$HYBRID_PID"; exit 0' INT TERM
+  hybrid_reconcile "$wc" || true
+  while sleep "$iv"; do hybrid_reconcile "$wc" || true; done
+}
+
+hybrid_status(){
+  local cur; cur=$(cat "$HYBRID_STATE" 2>/dev/null || echo "unset")
+  echo "  hybrid last-applied provider : $cur"
+  echo "  coordinator                  : $(coord_ref)"
+  printf '  elite pair                   : '; for a in "${ELITE_AGENTS[@]}"; do agent_ref "$AGENTS/$a.md"; done | sort -u | tr '\n' ' '; echo
+  local now; now=$(date +%s)
+  if [ "$now" -lt "$HYBRID_KIMI_ANCHOR" ]; then
+    echo "  kimi window                  : COOLDOWN until $(date -u -d @"$HYBRID_KIMI_ANCHOR" '+%F %H:%M')Z ($(( (HYBRID_KIMI_ANCHOR-now)/60 ))min)"
+  else
+    local wb ws we capped; wb=$(kimi_win_bounds); ws=${wb% *}; we=${wb#* }
+    capped=$(cat "$HYBRID_KIMI_CAP_FILE" 2>/dev/null || echo 0)
+    if [ "$capped" -gt "$now" ]; then echo "  kimi window                  : CAPPED (5h used) — rolls $(date -u -d @"$we" '+%H:%M')Z"
+    elif kimi_available; then echo "  kimi window                  : OPEN $(date -u -d @"$ws" '+%H:%M')-$(date -u -d @"$we" '+%H:%M')Z"
+    else echo "  kimi window                  : BLOCKED (429) — rolls $(date -u -d @"$we" '+%H:%M')Z"; fi
+  fi
+  if [ -f "$HYBRID_PID" ] && kill -0 "$(cat "$HYBRID_PID" 2>/dev/null)" 2>/dev/null; then echo "  watcher                      : running (pid $(cat "$HYBRID_PID"))"; else echo "  watcher                      : not running"; fi
+  [ -f "$HYBRID_LOG" ] && { echo "  recent transitions:"; grep -- '->' "$HYBRID_LOG" 2>/dev/null | tail -3 | sed 's/^/    /'; }
+}
+
+hybrid_off(){
+  if [ -f "$HYBRID_PID" ] && kill -0 "$(cat "$HYBRID_PID" 2>/dev/null)" 2>/dev/null; then
+    kill "$(cat "$HYBRID_PID")" 2>/dev/null && ok "hybrid watcher stopped"
+  else ok "no hybrid watcher running"; fi
+  rm -f "$HYBRID_PID"
+}
+
+# ---------------- AMD daily-budget fallback (AMD $1/day cap -> OpenRouter) ----------------
+# The free AMD/Radeon account has a ~$1/day spend cap. When it is exhausted every AMD
+# model returns 429 "Daily usage limit exceeded". This flips the AMD-tier agents to a
+# paid OpenRouter equivalent when the cap is hit, and back to free AMD when it resets.
+# It snapshots each agent's HOME amd-radeon model so the split (V4-Flash/Qwen) is
+# restored exactly. Reasoning-critical agents already on OpenRouter are not in the
+# snapshot, so they stay put.
+AMDFB_HOME_FILE="$HOME/.pi/agent/.amdfb-home"
+AMDFB_MODE_FILE="$HOME/.pi/agent/.amdfb-mode"
+AMDFB_PID="$HOME/.pi/agent/.amdfb.pid"
+AMDFB_LOG="$HOME/.pi/agent/amd-fallback.log"
+AMDFB_AMD_ENV="$HOME/.pi/secrets/amd.env"
+AMDFB_URL="https://developer.amd.com.cn/radeon/api/v1/chat/completions"
+AMDFB_OR_HUNTER="openrouter/deepseek/deepseek-v4.1-flash"   # reasoning fallback for hunters
+AMDFB_OR_FAST="openrouter/deepseek/deepseek-v4-flash"       # cheaper fallback for mechanical
+
+amd_usable(){ # 0 = AMD budget OK, 1 = daily cap / unreachable
+  local key code
+  [ -f "$AMDFB_AMD_ENV" ] && . "$AMDFB_AMD_ENV" 2>/dev/null
+  key="${RADEON_API_KEY:-}"; [ -n "$key" ] || return 1
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$AMDFB_URL" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $key" \
+    -d '{"model":"DeepSeek-V4-Flash","messages":[{"role":"user","content":"x"}],"max_tokens":3}' 2>/dev/null || echo 000)
+  [ "$code" = "200" ]
+}
+
+amdfb_snapshot(){ # record home AMD model of every agent currently on amd-radeon (once)
+  [ -s "$AMDFB_HOME_FILE" ] && return 0
+  : > "$AMDFB_HOME_FILE"; local f a m
+  for f in "$AGENTS"/*.md; do a=$(basename "$f" .md); m=$(agent_ref "$f"); case "$m" in amd-radeon/*) echo "$a=$m" >> "$AMDFB_HOME_FILE";; esac; done
+  ok "amd-fallback: snapshotted $(grep -c = "$AMDFB_HOME_FILE") AMD-tier agents"
+}
+
+amdfb_apply(){ # $1 = amd | openrouter
+  local mode="$1" line a home
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue; a="${line%%=*}"; home="${line#*=}"
+    [ -f "$AGENTS/$a.md" ] || continue
+    if [ "$mode" = amd ]; then set_model "$AGENTS/$a.md" "$home"
+    elif is_fast_agent "$a"; then set_model "$AGENTS/$a.md" "$AMDFB_OR_FAST"
+    else set_model "$AGENTS/$a.md" "$AMDFB_OR_HUNTER"; fi
+  done < "$AMDFB_HOME_FILE"
+  printf '%s\n' "$mode" > "$AMDFB_MODE_FILE"
+}
+
+amdfb_reconcile(){ # prints on transition; 0 = changed
+  amdfb_snapshot
+  local cur desired; cur=$(cat "$AMDFB_MODE_FILE" 2>/dev/null || echo "")
+  if amd_usable; then desired=amd; else desired=openrouter; fi
+  if [ "$desired" != "$cur" ]; then
+    amdfb_apply "$desired"
+    printf '%s amd-fallback: %s -> %s (AMD %s) — %s agents; applies at next subagent spawn\n' \
+      "$(date "+%F %T")" "${cur:-none}" "$desired" "$([ "$desired" = amd ] && echo "budget reset/OK" || echo "daily cap hit")" "$(grep -c = "$AMDFB_HOME_FILE")" | tee -a "$AMDFB_LOG"
+    return 0
+  fi
+  printf '%s amd-fallback: steady (%s)\n' "$(date "+%F %T")" "$desired" >> "$AMDFB_LOG"; return 1
+}
+
+amdfb_watch(){ local iv="${1:-300}"; echo $$ > "$AMDFB_PID"; ok "amd-fallback watch (pid $$, every ${iv}s). Log: $AMDFB_LOG"; trap 'rm -f "$AMDFB_PID"; exit 0' INT TERM; amdfb_reconcile || true; while sleep "$iv"; do amdfb_reconcile || true; done; }
+
+amdfb_status(){
+  amdfb_snapshot
+  echo "  amd-fallback mode : $(cat "$AMDFB_MODE_FILE" 2>/dev/null || echo unset)"
+  echo "  managed agents    : $(grep -c = "$AMDFB_HOME_FILE") (home snapshot: $AMDFB_HOME_FILE)"
+  if amd_usable; then echo "  AMD daily budget  : OK (free tier usable)"; else echo "  AMD daily budget  : EXHAUSTED (\$1/day cap, 429) — using OpenRouter"; fi
+  if [ -f "$AMDFB_PID" ] && kill -0 "$(cat "$AMDFB_PID" 2>/dev/null)" 2>/dev/null; then echo "  watcher           : running (pid $(cat "$AMDFB_PID"))"; else echo "  watcher           : not running"; fi
+  [ -f "$AMDFB_LOG" ] && { echo "  recent:"; grep -- '->' "$AMDFB_LOG" 2>/dev/null | tail -3 | sed 's/^/    /'; }
+}
+
+amdfb_off(){ if [ -f "$AMDFB_PID" ] && kill -0 "$(cat "$AMDFB_PID" 2>/dev/null)" 2>/dev/null; then kill "$(cat "$AMDFB_PID")" 2>/dev/null && ok "amd-fallback watcher stopped"; else ok "no amd-fallback watcher running"; fi; rm -f "$AMDFB_PID"; }
+
+# ---------------- Coordinator-provider health failover ----------------
+# The coordinator runs on one provider (currently OpenRouter). If THAT provider
+# 429s/402s/goes down, the whole hunt freezes silently (the auto-continue watchdog
+# only covers empty end_turn, not a dead coordinator). This probes the coordinator's
+# provider and, when it is down, STAGES the first healthy fallback into the
+# coordinator slot for the next launch. A coordinator model only applies at launch,
+# so this cannot un-stick a live frozen hunt — but it guarantees the relaunch comes
+# up healthy, and announces the freeze loudly so a relaunch happens.
+COORDH_PID="$HOME/.pi/agent/.coordh.pid"
+COORDH_LOG="$HOME/.pi/agent/coord-health.log"
+OR_KEY_ENV="$HOME/.pi/secrets/openrouter.env"
+OR_URL="https://openrouter.ai/api/v1/chat/completions"
+# Reasoning-capable coordinator fallbacks, most-reliable first. Each is provider/model.
+COORD_FALLBACKS=(
+  "openrouter/deepseek/deepseek-v4.1-flash:high"
+  "amd-radeon/DeepSeek-V4.1-Flash:high"
+  "kimi-coding/k3.1-pro"
+)
+
+openrouter_usable(){ # 0 = OpenRouter answering, 1 = down/credits/429/bad key
+  local key code
+  [ -f "$OR_KEY_ENV" ] && . "$OR_KEY_ENV" 2>/dev/null
+  key="${OPENROUTER_API_KEY:-}"; [ -n "$key" ] || return 1
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$OR_URL" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $key" \
+    -d '{"model":"deepseek/deepseek-v4.1-flash","messages":[{"role":"user","content":"x"}],"max_tokens":1}' 2>/dev/null || echo 000)
+  case "$code" in 200|400) return 0;; *) return 1;; esac
+}
+
+provider_usable(){ # $1 = provider segment of a ref
+  case "$1" in
+    openrouter)  openrouter_usable ;;
+    amd-radeon)  amd_usable ;;
+    kimi-coding) kimi_available ;;
+    *)           return 0 ;;   # unprobeable provider: assume up, don't flap
+  esac
+}
+
+coordh_reconcile(){ # prints on transition; 0 = changed
+  local cur curprov ref prov
+  cur=$(coord_ref); curprov="${cur%%/*}"
+  if provider_usable "$curprov"; then
+    printf '%s coord-health: steady (%s, %s up)\n' "$(date '+%F %T')" "$cur" "$curprov" >> "$COORDH_LOG"
+    return 1
+  fi
+  for ref in "${COORD_FALLBACKS[@]}"; do
+    prov="${ref%%/*}"
+    [ "$prov" = "$curprov" ] && continue
+    if provider_usable "$prov"; then
+      echo "$ref" > "$COORD_STATE"
+      printf '%s coord-health: %s DOWN -> coordinator %s -> %s (%s up); applies at next launch — RELAUNCH to un-stick a frozen hunt\n' \
+        "$(date '+%F %T')" "$curprov" "$cur" "$ref" "$prov" | tee -a "$COORDH_LOG"
+      return 0
+    fi
+  done
+  printf '%s coord-health: %s DOWN and NO healthy fallback — coordinator left at %s\n' \
+    "$(date '+%F %T')" "$curprov" "$cur" | tee -a "$COORDH_LOG"
+  return 1
+}
+
+coordh_watch(){ local iv="${1:-120}"; echo $$ > "$COORDH_PID"; ok "coord-health watch (pid $$, every ${iv}s). Log: $COORDH_LOG"; trap 'rm -f "$COORDH_PID"; exit 0' INT TERM; coordh_reconcile || true; while sleep "$iv"; do coordh_reconcile || true; done; }
+
+coordh_status(){
+  local cur curprov; cur=$(coord_ref); curprov="${cur%%/*}"
+  echo "  coordinator          : $cur"
+  if provider_usable "$curprov"; then echo "  coordinator provider : $curprov UP"
+  else echo "  coordinator provider : $curprov DOWN — hunt likely FROZEN; relaunch to apply staged fallback"; fi
+  echo "  fallback order       : ${COORD_FALLBACKS[*]}"
+  if [ -f "$COORDH_PID" ] && kill -0 "$(cat "$COORDH_PID" 2>/dev/null)" 2>/dev/null; then echo "  watcher              : running (pid $(cat "$COORDH_PID"))"; else echo "  watcher              : not running"; fi
+  [ -f "$COORDH_LOG" ] && { echo "  recent:"; grep -- '->' "$COORDH_LOG" 2>/dev/null | tail -3 | sed 's/^/    /'; }
+}
+
+coordh_off(){ if [ -f "$COORDH_PID" ] && kill -0 "$(cat "$COORDH_PID" 2>/dev/null)" 2>/dev/null; then kill "$(cat "$COORDH_PID")" 2>/dev/null && ok "coord-health watcher stopped"; else ok "no coord-health watcher running"; fi; rm -f "$COORDH_PID"; }
+
 case "${1:-status}" in
-  on)
-    FM="$(fast_ref)"; FL="$(flagship)"
-    case "$FM" in */*) ;; *) err "fast ref must be provider/model (got '$FM')"; exit 1;; esac
-    have_model "$FM" || { err "fast model '${FM#*/}' not in models.json"; exit 1; }
-    [ -n "$FL" ] || { err "no kimi-coding flagship found among agents"; exit 1; }
-    for f in "$AGENTS"/*.md; do
-      a=$(basename "$f" .md)
-      if is_fast_agent "$a"; then set_model "$f" "$FM"
-      elif is_elite_agent "$a"; then set_model "$f" "$ELITE_DEFAULT"
-      else set_model "$f" "$FL"; fi
-    done
-    ok "tiering ON: ${#FAST_AGENTS[@]} mechanical -> $FM | ${#ELITE_AGENTS[@]} elite -> $ELITE_DEFAULT | rest -> $FL"
-    status
-    ;;
-  off)
-    FL="$(flagship)"
-    [ -n "$FL" ] || { err "no kimi-coding flagship found among agents"; exit 1; }
-    for f in "$AGENTS"/*.md; do
-      a=$(basename "$f" .md)
-      if is_elite_agent "$a"; then set_model "$f" "$ELITE_DEFAULT"
-      elif ! is_fast_agent "$a"; then set_model "$f" "$FL"; fi
-    done
-    ok "tiering OFF: mechanical agents -> $FL | elite stays $ELITE_DEFAULT"
-    status
-    ;;
+  on) apply_on ;;
+  off) apply_off ;;
+  amd-fallback)
+    case "${2:-once}" in
+      once|reconcile) amdfb_reconcile || true; amdfb_status ;;
+      watch) amdfb_watch "${3:-300}" ;;
+      status) amdfb_status ;;
+      off|stop) amdfb_off ;;
+      reset) rm -f "$AMDFB_HOME_FILE" "$AMDFB_MODE_FILE"; ok "amd-fallback snapshot/mode cleared" ;;
+      *) err "usage: pi-tier amd-fallback {once|watch [sec]|status|off|reset}" ;;
+    esac ;;
+  coord-health)
+    case "${2:-once}" in
+      once|reconcile) coordh_reconcile || true; coordh_status ;;
+      watch) coordh_watch "${3:-120}" ;;
+      status) coordh_status ;;
+      off|stop) coordh_off ;;
+      *) err "usage: pi-tier coord-health {once|watch [sec]|status|off}" ;;
+    esac ;;
+  hybrid)
+    wc=0; for x in "$@"; do [ "$x" = "--coord" ] && wc=1; done
+    sub="${2:-once}"; [ "$sub" = "--coord" ] && sub=once
+    case "$sub" in
+      once|reconcile) hybrid_reconcile "$wc" || true; hybrid_status ;;
+      watch) ivv="${3:-120}"; case "$ivv" in --coord) ivv=120;; esac; hybrid_watch "$ivv" "$wc" ;;
+      status) hybrid_status ;;
+      off|stop) hybrid_off ;;
+      *) err "usage: pi-tier hybrid {once|watch [sec]|status|off} [--coord]";;
+    esac ;;
   set-fast)
     [ -n "${2:-}" ] || { err "usage: pi-tier set-fast <provider/model>"; exit 1; }
-    case "$2" in */*) ref="$2";; *) ref="$KIMI/$2";; esac
-    have_model "$ref" || { err "model '${ref#*/}' not in models.json"; exit 1; }
-    echo "$ref" > "$STATE"; ok "fast ref = $ref (run 'pi-tier on' to apply)"
-    ;;
-  status|"") status;;
-  -h|--help|help) sed -n '2,20p' "$0" | sed 's/^#\s\?//';;
-  *) err "usage: pi-tier {on|off|status|set-fast <provider/model>}";;
+    set_state "$FAST_STATE" "$2" "fast" ;;
+  set-hunter)
+    [ -n "${2:-}" ] || { err "usage: pi-tier set-hunter <provider/model>"; exit 1; }
+    set_state "$HUNTER_STATE" "$2" "hunter" ;;
+  set-flagship)
+    [ -n "${2:-}" ] || { err "usage: pi-tier set-flagship <model>"; exit 1; }
+    set_state "$FLAGSHIP_STATE" "$2" "Kimi fallback" ;;
+  set-coordinator)
+    [ -n "${2:-}" ] || { err "usage: pi-tier set-coordinator <provider/model[:thinking]>"; exit 1; }
+    set_state "$COORD_STATE" "$2" "coordinator" ;;
+  set-agent)
+    [ -n "${2:-}" ] && [ -n "${3:-}" ] || { err "usage: pi-tier set-agent <agent> <provider/model>"; exit 1; }
+    set_agent "$2" "$3" ;;
+  clear-agent)
+    [ -n "${2:-}" ] || { err "usage: pi-tier clear-agent <agent>"; exit 1; }
+    clear_agent "$2" ;;
+  status|"") status ;;
+  -h|--help|help) sed -n '2,41p' "$0" | sed 's/^#\s\?//' ;;
+  *) err "usage: pi-tier {on|off|status|set-fast|set-hunter|set-flagship|set-coordinator|set-agent|clear-agent|hybrid|amd-fallback|coord-health}";;
 esac
