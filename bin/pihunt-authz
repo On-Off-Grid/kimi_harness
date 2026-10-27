@@ -24,7 +24,21 @@ import json
 import os
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def _find_root():
+    # Walk up from the working directory to the repo (dir containing reports/),
+    # so the tool works bare-on-PATH from the repo root or any subdir. Fall back
+    # to the parent of the script's bin/ dir (repo-relative invocation).
+    d = os.getcwd()
+    while True:
+        if os.path.isdir(os.path.join(d, "reports")):
+            return d
+        p = os.path.dirname(d)
+        if p == d:
+            return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        d = p
+
+
+ROOT = _find_root()
 MARK = {True: "ENFORCED", False: "**LEAK**", None: "untested", "blocked": "blocked"}
 CLASS_RANK = {"OPEN": 3, "SPLIT": 2, "COLD": 1, "CLEAR": 0}
 

@@ -50,7 +50,7 @@ if [ "$(pi --version 2>/dev/null)" = "0.79.0" ]; then ok "pi 0.79.0 already inst
 
 c "2/9  pi agent config  ->  $H/.pi/agent"
 run "mkdir -p '$H/.pi/agent'"; bk "$H/.pi/agent"
-run "rsync -a '$SRC/pi-agent/' '$H/.pi/agent/'" && ok "26 agents, extensions (mcp-bridge, subagent ensemble/swarm + MCP profiles, auto-continue), models.json, settings.json, prompts, adapter"
+run "rsync -a '$SRC/pi-agent/' '$H/.pi/agent/'" && ok "26 agents, extensions (mcp-bridge, subagent ensemble/swarm + MCP profiles, human-alert, auto-continue, continuous-learning), models.json, settings.json, prompts, adapter"
 [ "$DRY" = 0 ] && grep -Ilr "$OLD_HOME" "$H/.pi/agent" 2>/dev/null | while read -r f; do sed -i "s|$OLD_HOME|$H|g" "$f"; done
 [ -f "$H/.pi/agent/extensions/mcp-bridge/package.json" ] && npmdeps "$H/.pi/agent/extensions/mcp-bridge"
 [ -f "$H/.pi/agent/bin/fd" ] && chmod +x "$H/.pi/agent/bin/fd" 2>/dev/null
@@ -119,7 +119,7 @@ else warn "rag/install-rag.sh not bundled — skipping RAG"; fi
 
 c "6/7  launchers  ->  $H/.local/bin"
 run "mkdir -p '$H/.local/bin'"
-for l in pi-hunt pi-4.8 pi-tier; do [ -f "$SRC/bin/$l" ] || continue; bk "$H/.local/bin/$l"; run "cp -p '$SRC/bin/$l' '$H/.local/bin/$l'"; rehome "$H/.local/bin/$l"; run "chmod +x '$H/.local/bin/$l'"; done
+for l in pi-hunt pi-4.8 pi-tier pihunt-gadgets pihunt-authz; do [ -f "$SRC/bin/$l" ] || continue; bk "$H/.local/bin/$l"; run "cp -p '$SRC/bin/$l' '$H/.local/bin/$l'"; rehome "$H/.local/bin/$l"; run "chmod +x '$H/.local/bin/$l'"; done
 ok "pi-hunt (Kimi Code), pi-4.8 (flagship toggle), pi-tier (cost tiering)"
 # continuous-recon engine + scheduler + registry helper
 if [ -d "$SRC/recon" ]; then
@@ -143,11 +143,18 @@ if [ -f "$SRC/systemd/pihunt-recon.service" ] && [ "$DRY" = 0 ]; then
   cp -p "$SRC/systemd/pihunt-recon.timer" "$H/.config/systemd/user/pihunt-recon.timer"
   ok "recon timer unit installed (every 6h, --fast)"
 fi
+# CVE + attack-pattern freshness timer (KEV/NVD/EPSS -> RAG)
+if [ -f "$SRC/systemd/pihunt-cve.service" ] && [ "$DRY" = 0 ]; then
+  sed "s|$OLD_HOME|$H|g" "$SRC/systemd/pihunt-cve.service" > "$H/.config/systemd/user/pihunt-cve.service"
+  cp -p "$SRC/systemd/pihunt-cve.timer" "$H/.config/systemd/user/pihunt-cve.timer"
+  ok "cve-freshness timer unit installed (daily; KEV/NVD/EPSS -> RAG)"
+fi
 if command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
   run "systemctl --user daemon-reload"
   [ -f "$H/.config/systemd/user/pihunt-recon.timer" ] && run "systemctl --user enable --now pihunt-recon.timer" && ok "recon timer enabled (register programs: pihunt-recon-reg add <prog> <domains>)"
+  [ -f "$H/.config/systemd/user/pihunt-cve.timer" ] && run "systemctl --user enable --now pihunt-cve.timer" && ok "cve-freshness timer enabled (daily KEV/NVD/EPSS refresh)"
   run "loginctl enable-linger '$USER_NAME'" && ok "linger enabled"
-else warn "systemd --user unavailable. The optional recon timer was not enabled."; fi
+else warn "systemd --user unavailable. The optional recon/cve timers were not enabled."; fi
 
 c "7/7  verify"
 # Offline self-test of the force-multiplier logic (ensemble/swarm builders, MCP
@@ -158,6 +165,12 @@ if [ "$DRY" = 0 ] && [ -f "$ST" ]; then
     && ok "subagent self-test passed (ensemble/swarm/profiles/RAM/depth/retry)" \
     || warn "subagent self-test FAILED — see /tmp/pihunt-selftest.log"
 else [ "$DRY" = 1 ] && printf '   [dry] run subagent selftest.mjs\n'; fi
+HA="$H/.pi/agent/extensions/human-alert/selftest.mjs"
+if [ "$DRY" = 0 ] && [ -f "$HA" ]; then
+  ( cd "$H/.pi/agent/extensions/human-alert" && node --experimental-strip-types ./selftest.mjs >/tmp/pihunt-human-alert-selftest.log 2>&1 ) \
+    && ok "human-alert self-test passed (browser-only gating/cooldown)" \
+    || warn "human-alert self-test FAILED — see /tmp/pihunt-human-alert-selftest.log"
+else [ "$DRY" = 1 ] && printf '   [dry] run human-alert selftest.mjs\n'; fi
 AGENTS_N="$(ls "$H/.pi/agent/agents/"*.md 2>/dev/null | wc -l)"
 [ "$DRY" = 0 ] && ok "$AGENTS_N specialist agents installed"
 
