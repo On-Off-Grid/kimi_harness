@@ -47,6 +47,17 @@
 #                                      OpenRouter-only or none -> base (3). Writes
 #                                      pihunt-tuning.env; applies at NEXT launch, so
 #                                      re-source that env / open a new shell first.
+#   pi-tier stall-watch [once|watch [sec]|status|off]
+#                                      Hung-hunt watchdog. A wedged coordinator
+#                                      (empty end_turn freeze) or a subagent stuck
+#                                      on "(running)" emits no events, so nothing
+#                                      in-process can alert. This polls the newest
+#                                      write across all session transcripts + the
+#                                      project casefile; if pi is alive but nothing
+#                                      advanced for PIHUNT_STALL_THRESHOLD (600s),
+#                                      it rings the desk (notify-send/paplay/spd-say)
+#                                      so you can relaunch/steer. Run it alongside a
+#                                      hunt: `pi-tier stall-watch watch 120 &`.
 #
 # Fast/hunter/coordinator refs must exist in ~/.pi/agent/models.json. Effect
 # applies to NEW subagent spawns; a running session keeps its model until relaunch.
@@ -533,19 +544,124 @@ conc_reconcile(){ # prints on transition; 0 = changed
 
 conc_watch(){ local iv="${1:-300}"; echo $$ > "$CONCWATCH_PID"; ok "concurrency watch (pid $$, every ${iv}s). Log: $CONCWATCH_LOG"; trap 'rm -f "$CONCWATCH_PID"; exit 0' INT TERM; conc_reconcile || true; while sleep "$iv"; do conc_reconcile || true; done; }
 
+conc_live(){ # echoes "<pid>:<value>" of the running pi process's env var, or empty
+  local pid v
+  for pid in $(pgrep -x pi 2>/dev/null); do
+    v=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^PI_SUBAGENT_MAX_CONCURRENCY=//p' | head -1)
+    [ -n "$v" ] && { echo "$pid:$v"; return 0; }
+    echo "$pid:"; return 0
+  done
+  return 1
+}
+
 conc_status(){
-  local pr n up cur want
+  local pr n up cur want live lpid lval
   pr=$(conc_providers); n=${pr%%|*}; up=${pr#*|}
   cur=$(conc_current); want=$(conc_desired "$n" "$up")
-  echo "  PI_SUBAGENT_MAX_CONCURRENCY : ${cur:-unset}  (file: $TUNING_ENV)"
+  echo "  file (pihunt-tuning.env)    : ${cur:-unset}  ($TUNING_ENV)"
+  live=$(conc_live); lpid=${live%%:*}; lval=${live#*:}
+  if [ -n "$live" ]; then
+    echo "  running pi (pid $lpid)        : ${lval:-<not in env>}  <- governs the LIVE hunt"
+    if [ -n "$lval" ] && [ "$lval" != "${cur:-}" ]; then
+      echo "  ⚠ live != file              : the hunt is running at $lval, file says ${cur:-unset} — re-source the env and RELAUNCH to apply the file value"
+    fi
+  else
+    echo "  running pi                  : none (file value applies at next launch)"
+  fi
   echo "  providers up                : $n —${up:- none}"
   echo "  desired for this state      : $want  (high=$CONC_HIGH mid=$CONC_MID base=$CONC_BASE)"
-  if [ "${cur:-}" = "$want" ]; then echo "  status                      : in sync"; else echo "  status                      : OUT OF SYNC — run 'pi-tier concurrency once', then re-source + relaunch"; fi
+  if [ "${cur:-}" = "$want" ]; then echo "  file vs desired             : in sync"; else echo "  file vs desired             : OUT OF SYNC — run 'pi-tier concurrency once' to set the file to $want"; fi
   if [ -f "$CONCWATCH_PID" ] && kill -0 "$(cat "$CONCWATCH_PID" 2>/dev/null)" 2>/dev/null; then echo "  watcher                     : running (pid $(cat "$CONCWATCH_PID"))"; else echo "  watcher                     : not running"; fi
   [ -f "$CONCWATCH_LOG" ] && { echo "  recent:"; grep -- '->' "$CONCWATCH_LOG" 2>/dev/null | tail -3 | sed 's/^/    /'; }
 }
 
 conc_off(){ if [ -f "$CONCWATCH_PID" ] && kill -0 "$(cat "$CONCWATCH_PID" 2>/dev/null)" 2>/dev/null; then kill "$(cat "$CONCWATCH_PID")" 2>/dev/null && ok "concurrency watcher stopped"; else ok "no concurrency watcher running"; fi; rm -f "$CONCWATCH_PID"; }
+
+# ---------------- Stall / hung-agent watchdog ----------------
+# Nothing in-process can alert when the COORDINATOR itself wedges (the empty
+# end_turn freeze) or when a subagent shows "(running)" on the TUI but produces
+# no output: a hung loop emits no events, so the human-alert extension never
+# fires. This external poller watches the newest write across all session
+# transcripts + the project casefile. If a pi process is alive but nothing
+# anywhere has advanced for the stall threshold, the hunt is effectively idle ->
+# ring the desk (same notify path as human-alert) so the operator can relaunch
+# or steer. It only surfaces the stall; it cannot un-stick the hunt.
+#   PIHUNT_STALL_THRESHOLD (default 600s) idle time that counts as stalled
+#   PIHUNT_STALL_REALARM   (default 900s) minimum gap between desk alarms
+#   PIHUNT_CASEFILE        (default $PWD/.pi/casefile.jsonl) progress file to watch
+#   PIHUNT_ALERT=0         silences the desk alarm (log only); PIHUNT_STALL_DRY_RUN=1 same
+STALLW_PID="$HOME/.pi/agent/.stallwatch.pid"
+STALLW_LOG="$HOME/.pi/agent/stall-watch.log"
+STALLW_SESS_DIR="$HOME/.pi/agent/sessions"
+STALLW_LAST_ALARM="$HOME/.pi/agent/.stallwatch-last-alarm"
+STALLW_SOUND="/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"
+STALLW_THRESH="${PIHUNT_STALL_THRESHOLD:-600}"
+STALLW_REALARM="${PIHUNT_STALL_REALARM:-900}"
+STALLW_CASEFILE="${PIHUNT_CASEFILE:-$PWD/.pi/casefile.jsonl}"
+
+pi_alive(){ pgrep -x pi >/dev/null 2>&1; }
+
+stallw_newest_mtime(){ # epoch secs of the most recent transcript/casefile write, or 0
+  local newest=0 m
+  if [ -d "$STALLW_SESS_DIR" ]; then
+    m=$(find "$STALLW_SESS_DIR" -type f -name '*.jsonl' -printf '%T@\n' 2>/dev/null | sort -nr | head -1)
+    [ -n "$m" ] && newest=${m%.*}
+  fi
+  if [ -f "$STALLW_CASEFILE" ]; then
+    m=$(date -r "$STALLW_CASEFILE" +%s 2>/dev/null || echo 0)
+    [ "$m" -gt "$newest" ] && newest="$m"
+  fi
+  echo "$newest"
+}
+
+stallw_alarm(){ # $1=message; rate-limited by STALLW_REALARM; respects PIHUNT_ALERT=0 / dry-run
+  local msg="$1" now last
+  now=$(date +%s); last=$(cat "$STALLW_LAST_ALARM" 2>/dev/null || echo 0)
+  case "$last" in ''|*[!0-9]*) last=0;; esac
+  [ $((now - last)) -lt "$STALLW_REALARM" ] && return 0
+  echo "$now" > "$STALLW_LAST_ALARM"
+  printf '%s stall-watch: ALARM %s\n' "$(date '+%F %T')" "$msg" | tee -a "$STALLW_LOG"
+  [ "${PIHUNT_ALERT:-1}" = "0" ] && return 0
+  [ "${PIHUNT_STALL_DRY_RUN:-0}" = "1" ] && return 0
+  ( DISPLAY="${DISPLAY:-:0}" notify-send -u critical -t 0 --expire-time 0 "pi-hunt: HUNT STALLED" "$msg" >/dev/null 2>&1 & )
+  ( paplay "$STALLW_SOUND" >/dev/null 2>&1 & ); ( paplay "$STALLW_SOUND" >/dev/null 2>&1 & )
+  ( spd-say "Bug bounty hunt stalled, the agents are idle. Please check." >/dev/null 2>&1 & )
+}
+
+stallw_check(){ # 0 = stalled (alarmed), 1 = healthy / not running
+  local newest now age
+  if ! pi_alive; then
+    printf '%s stall-watch: no pi process running\n' "$(date '+%F %T')" >> "$STALLW_LOG"; return 1
+  fi
+  newest=$(stallw_newest_mtime); now=$(date +%s)
+  if [ "$newest" -le 0 ]; then
+    printf '%s stall-watch: pi alive but no transcript/casefile found under %s\n' "$(date '+%F %T')" "$STALLW_SESS_DIR" >> "$STALLW_LOG"; return 1
+  fi
+  age=$((now - newest))
+  if [ "$age" -ge "$STALLW_THRESH" ]; then
+    stallw_alarm "pi alive but idle ${age}s (no transcript/casefile write; threshold ${STALLW_THRESH}s) — coordinator or subagents hung; check the TUI / relaunch"
+    return 0
+  fi
+  printf '%s stall-watch: healthy (last write %ds ago, threshold %ds)\n' "$(date '+%F %T')" "$age" "$STALLW_THRESH" >> "$STALLW_LOG"
+  return 1
+}
+
+stallw_watch(){ local iv="${1:-120}"; echo $$ > "$STALLW_PID"; ok "stall-watch (pid $$, every ${iv}s, idle>=${STALLW_THRESH}s). Log: $STALLW_LOG"; trap 'rm -f "$STALLW_PID"; exit 0' INT TERM; stallw_check || true; while sleep "$iv"; do stallw_check || true; done; }
+
+stallw_status(){
+  local newest now age
+  if pi_alive; then echo "  pi process          : running (pid $(pgrep -x pi | tr '\n' ' '))"; else echo "  pi process          : not running"; fi
+  newest=$(stallw_newest_mtime); now=$(date +%s)
+  if [ "$newest" -gt 0 ]; then age=$((now - newest)); echo "  last hunt activity  : ${age}s ago ($(date -d "@$newest" '+%F %T' 2>/dev/null))"; else echo "  last hunt activity  : none found"; fi
+  echo "  stall threshold     : ${STALLW_THRESH}s   re-alarm gap: ${STALLW_REALARM}s"
+  echo "  watching            : $STALLW_SESS_DIR + $STALLW_CASEFILE"
+  if pi_alive && [ "$newest" -gt 0 ] && [ "$((now - newest))" -ge "$STALLW_THRESH" ]; then echo "  state               : ⚠ STALLED — check the TUI / relaunch";
+  elif pi_alive; then echo "  state               : active"; else echo "  state               : idle (no hunt)"; fi
+  if [ -f "$STALLW_PID" ] && kill -0 "$(cat "$STALLW_PID" 2>/dev/null)" 2>/dev/null; then echo "  watcher             : running (pid $(cat "$STALLW_PID"))"; else echo "  watcher             : not running"; fi
+  [ -f "$STALLW_LOG" ] && { echo "  recent:"; grep -- 'ALARM' "$STALLW_LOG" 2>/dev/null | tail -3 | sed 's/^/    /'; }
+}
+
+stallw_off(){ if [ -f "$STALLW_PID" ] && kill -0 "$(cat "$STALLW_PID" 2>/dev/null)" 2>/dev/null; then kill "$(cat "$STALLW_PID")" 2>/dev/null && ok "stall-watch stopped"; else ok "no stall-watch running"; fi; rm -f "$STALLW_PID"; }
 
 case "${1:-status}" in
   on) apply_on ;;
@@ -604,6 +720,14 @@ case "${1:-status}" in
       off|stop) conc_off ;;
       *) err "usage: pi-tier concurrency {once|watch [sec]|status|off}" ;;
     esac ;;
+  stall-watch)
+    case "${2:-once}" in
+      once|check) stallw_check || true; stallw_status ;;
+      watch) stallw_watch "${3:-120}" ;;
+      status) stallw_status ;;
+      off|stop) stallw_off ;;
+      *) err "usage: pi-tier stall-watch {once|watch [sec]|status|off}" ;;
+    esac ;;
   -h|--help|help) sed -n '2,/^set -uo pipefail/p' "$0" | sed '/^set -uo pipefail/d; s/^#\s\?//' ;;
-  *) err "usage: pi-tier {on|off|status|set-fast|set-hunter|set-flagship|set-coordinator|set-agent|clear-agent|hybrid|amd-fallback|coord-health|concurrency}";;
+  *) err "usage: pi-tier {on|off|status|set-fast|set-hunter|set-flagship|set-coordinator|set-agent|clear-agent|hybrid|amd-fallback|coord-health|concurrency|stall-watch}";;
 esac
