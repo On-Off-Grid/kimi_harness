@@ -76,7 +76,8 @@ Refs are `provider/model[:thinking]` and must exist in `~/.pi/agent/models.json`
 pi-tier hybrid watch 300 &        # elite pair Kimi<->AMD on Kimi's 5h quota window
 pi-tier amd-fallback watch 300 &  # AMD $1/day cap -> OpenRouter, back on reset
 pi-tier coord-health watch 120 &  # coordinator provider down -> stage healthy fallback
-pi-tier concurrency watch 300 &   # scale PI_SUBAGENT_MAX_CONCURRENCY to # providers up (NEW)
+pi-tier concurrency watch 300 &   # scale PI_SUBAGENT_MAX_CONCURRENCY to # providers up
+pi-tier stall-watch watch 120 &   # ring the desk if the hunt goes idle/hung (NEW)
 ```
 
 **concurrency** scaling: sets `PI_SUBAGENT_MAX_CONCURRENCY` in `pihunt-tuning.env` from how many
@@ -95,7 +96,16 @@ pi-tier hybrid off    | amd-fallback off    | coord-health off
   down (429/402/401/unreachable) it stages the first *healthy* fallback (OpenRouter→AMD→Kimi) into
   `.coordinator-model` for the **next launch** and logs it loudly. It cannot relaunch the TUI, so a
   live frozen hunt still needs a manual relaunch — but it comes up on a healthy provider.
-- Watcher logs: `~/.pi/agent/{hybrid,amd-fallback,coord-health}.log`.
+- **stall-watch** (the hung-hunt alarm): `coord-health` stages a fix but can't *tell you* the hunt
+  wedged; a wedged coordinator or a subagent stuck on "(running)" emits no events, so the in-process
+  `human-alert` extension never fires. `stall-watch` polls the newest write across all session
+  transcripts + the project casefile; if `pi` is alive but nothing advanced for
+  `PIHUNT_STALL_THRESHOLD` (600s), it rings the desk (notify-send/paplay/spd-say) so you can relaunch
+  or steer. Tunables: `PIHUNT_STALL_THRESHOLD`, `PIHUNT_STALL_REALARM` (min gap between alarms, 900s),
+  `PIHUNT_CASEFILE`; `PIHUNT_ALERT=0` or `PIHUNT_STALL_DRY_RUN=1` silences the desk (log only).
+  `pi-tier stall-watch status` shows live activity age + stall state. Run it **from the hunt's project
+  dir** so the default casefile path resolves.
+- Watcher logs: `~/.pi/agent/{hybrid,amd-fallback,coord-health,concurrency,stall-watch}.log`.
 - Workhorse = AMD DeepSeek-V4.1-Flash (free, big-ctx, cap-free over long runs, refusal-free).
 
 ---
@@ -184,6 +194,7 @@ pihunt-gadgets rank && pihunt-authz gaps
 # 2. set routing + start the safety watchers for a long run
 pi-tier status
 pi-tier hybrid watch 300 &  pi-tier amd-fallback watch 300 &  pi-tier coord-health watch 120 &
+pi-tier concurrency watch 300 &  pi-tier stall-watch watch 120 &   # scale + hung-hunt alarm
 
 # 3. launch the hunt (you drive the TUI) aimed at the top-ranked targets
 pi-hunt "Hunt digitalocean for CRITICAL"
