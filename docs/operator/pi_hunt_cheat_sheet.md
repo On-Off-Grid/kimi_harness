@@ -2,6 +2,8 @@
 
 This cheat sheet provides actionable instructions, grammar templates, and best practices for optimal and token-efficient steering of the `pi-hunt` coordinator.
 
+> For model/provider orchestration (`pi-tier`, the failover watchers) and the recon-synthesis tooling (`pihunt-gadgets`, `pihunt-authz`, the gadget graph), see **`pi-hunt-tooling-cheatsheet.md`** in this folder.
+
 ---
 
 ## 1. Quick Reference & Triggers
@@ -76,15 +78,19 @@ The single highest-leverage habit when using `pi-hunt` is ensuring no work is lo
 
 ## 5. Configuration Toggles
 
-To toggle the coordinator's primary model between **Claude Opus 4.8** (primary) and **Claude Opus 4.7** (fallback), use:
+Routing is state-driven. The default keeps Kimi elite-only: coordinator + 16 hunters on `amd-radeon/DeepSeek-V4.1-Flash`, 8 mechanical on `mistral-direct/codestral-latest`, and only `strict-triager` / `hypothesis-redteam` on `kimi-coding/k3.1-pro`.
 
 ```bash
 # Check current configuration & active agent counts
+pi-tier status
+
+# Restore the default three-tier mapping
+pi-tier on
+
+# Change just the coordinator (state file read by pi-hunt)
+pi-tier set-coordinator amd-radeon/DeepSeek-V4.1-Flash:high
+
+# Legacy Kimi-only quality toggle; does not touch DeepSeek/Mistral agents
 pi-4.8 status
-
-# Fall back to Claude Opus 4.7
-pi-4.8 off
-
-# Switch back to Claude Opus 4.8
-pi-4.8 on
+pi-4.8 on|off
 ```
