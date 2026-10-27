@@ -33,8 +33,10 @@ Symptom of a stale copy: a usage error that omits a flag you added (e.g. `pi-tie
 "usage: …{…|amd-fallback}" with no `coord-health`). Agents/prompts deploy the same way — that is
 what the prompt-gate "build drift" check guards.
 
-By contrast, **`pihunt-gadgets` and `pihunt-authz` are NOT on `PATH`** and must be run repo-relative
-(`bin/pihunt-gadgets …` from the repo root), because they resolve `reports/<prog>/` relative to the repo.
+`pihunt-gadgets` and `pihunt-authz` are **also deployed to `~/.local/bin`** (same redeploy rule after
+a repo edit), and they resolve `reports/<prog>/` by walking **up from your current directory** — so run
+them from inside the repo (bare `pihunt-gadgets rank`, or `bin/pihunt-gadgets rank`); from outside any
+repo they report no data rather than erroring.
 
 ---
 
